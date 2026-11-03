@@ -1,0 +1,38 @@
+from enum import StrEnum
+
+
+class TopicStatus(StrEnum):
+    ACTIVE = "ACTIVE"
+    DORMANT = "DORMANT"
+    RESUMED = "RESUMED"
+    CLOSED = "CLOSED"
+
+
+class AssociationKind(StrEnum):
+    CLASSIFIED = "CLASSIFIED"
+    REPLY_LINK = "REPLY_LINK"
+    DEFERRED = "DEFERRED"
+    IRRELEVANT = "IRRELEVANT"
+
+
+class ActionType(StrEnum):
+    CREATE_THREAD = "CREATE_THREAD"
+    APPEND_MESSAGE = "APPEND_MESSAGE"
+    UPSERT_SUMMARY = "UPSERT_SUMMARY"
+    RENAME_THREAD = "RENAME_THREAD"
+
+
+class ActionStatus(StrEnum):
+    PENDING = "PENDING"
+    CLAIMED = "CLAIMED"
+    SUCCEEDED = "SUCCEEDED"
+    FAILED = "FAILED"
+    DEAD = "DEAD"
+
+
+class JobStatus(StrEnum):
+    PENDING = "PENDING"
+    CLAIMED = "CLAIMED"
+    SUCCEEDED = "SUCCEEDED"
+    FAILED = "FAILED"
+    DEAD = "DEAD"

@@ -1,0 +1,9 @@
+{"message_id":"m-001","expected_topic_id":"launch","content":"We need to decide the launch date for the organizer."}
+{"message_id":"m-002","expected_topic_id":"api-auth","content":"The bot should send its API key in the X-API-Key header."}
+{"message_id":"m-003","expected_topic_id":"database","content":"Let's use Alembic migrations for the SQLite schema."}
+{"message_id":"m-004","expected_topic_id":"api-auth","content":"The admin credential should be separate from the bot key."}
+{"message_id":"m-005","expected_topic_id":"launch","content":"Thursday works for the launch if the API is ready."}
+{"message_id":"m-006","expected_topic_id":"database","content":"The migration must preserve existing conversation records."}
+{"message_id":"m-007","expected_topic_id":"launch","content":"I'll prepare the announcement after we confirm the date."}
+{"message_id":"m-008","expected_topic_id":"api-auth","content":"Requests without the bot token should receive 401."}
+{"message_id":"m-009","expected_topic_id":"database","content":"SQLite is enough for the first local version."}
