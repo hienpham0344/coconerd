@@ -2,6 +2,8 @@
 
 The current adapter uses Meta Model API's OpenAI-compatible endpoint. Defaults are `https://api.meta.ai/v1` and `muse-spark-1.3`; the Meta account controls which model IDs are available. The API key is read from `COCONERD_MODEL_API_KEY` (or the compatibility names `MODEL_API_KEY`, `COCONERD_META_API_KEY`, and `META_API_KEY`). The key is never returned by the admin API or written to logs.
 
+Topic classification uses Meta JSON-Schema structured output. Before the call, a deterministic local ranker reduces up to 30 same-guild open topics to at most five compact cards; it does not add another model call or provider. The request keeps a stable prompt prefix and shared cache key so Meta can apply prompt-prefix caching. Cached-token counts are recorded only when returned by the API; this is not a guarantee of cache hits or lower cost.
+
 Configuration precedence:
 
 1. Enabled guild model configuration written by an administrator.

@@ -13,6 +13,7 @@ Discord bot → Backend API → SQLite job queue → AI worker → Topics, summa
 
 - [Chạy nhanh](#chạy-nhanh)
 - [Tính năng](#tính-năng)
+- [Cấu trúc backend và lưu trữ](#cấu-trúc-backend-và-lưu-trữ)
 - [Tích hợp bot](#tích-hợp-bot)
 - [Cấu hình](#cấu-hình)
 - [API chính](#api-chính)
@@ -69,16 +70,43 @@ Mock chỉ chạy trong môi trường `development` hoặc `test`. Nó giúp ki
 - **Outbox cho Discord:** ghi action cùng transaction với cập nhật topic; bot claim, thực thi và ACK action qua API.
 - **Vận hành an toàn hơn:** API key riêng cho bot/admin, allowlist guild/channel, rate limit, giới hạn request, retry có giới hạn và retention dữ liệu.
 
+## Cấu trúc backend và lưu trữ
+
+Backend là một ứng dụng chia theo nghiệp vụ: `messages`, `topics`, `actions`, `guilds`, `model_config` và `health`. HTTP và worker gọi cùng lớp use case; persistence được truy cập qua repository và Unit of Work.
+
+```text
+backend/
+├── domain/                         # Entity và quy tắc vòng đời topic
+├── application/
+│   ├── services/                   # Use case theo nghiệp vụ
+│   ├── ports/persistence.py        # Interface repository và Unit of Work
+│   └── read_models.py              # DTO độc lập với database/HTTP
+├── infrastructure/database/
+│   ├── repositories/              # SQL và ánh xạ ORM → DTO
+│   ├── unit_of_work.py             # Quản lý transaction
+│   └── models.py                   # Schema SQLAlchemy
+├── presentation/api/
+│   ├── routers/                   # Endpoint theo nghiệp vụ
+│   └── app.py                     # Khởi tạo API và ghép router
+└── worker.py                      # Vòng lặp xử lý job và lịch bảo trì
+```
+
+**API:** chạy bằng `organizer-api`, mặc định ở `http://localhost:8000`; xem endpoint tại `/docs`. **Database:** SQLite mặc định ở `data/coconerd.db`, tính từ thư mục chạy lệnh. `alembic upgrade head` tạo/cập nhật bảng. API và worker phải dùng cùng `COCONERD_DATABASE_URL` để cùng đọc message, job, topic và action; restart tiến trình không xóa dữ liệu.
+
+Xem [kiến trúc backend](docs/BACKEND_ARCHITECTURE.md) để tra module, transaction và cách mở rộng nghiệp vụ.
+
 ## Tích hợp bot
 
 1. Admin bật guild và allowlist channel bằng `PUT /api/v1/admin/guilds/{guild_id}/settings`.
 2. Bot gửi message đến `POST /api/v1/messages` với header `X-API-Key`. Gửi Discord message ID, guild/channel, tác giả, nội dung và timestamp có timezone; reply có thể kèm `reply_to_message_id`.
 3. Backend lưu message/job và trả `202`; bot không phải chờ model phân loại.
-4. Worker phân loại message và ghi action cần thực hiện vào outbox.
+4. Worker chọn ngữ cảnh giới hạn từ các message trước đó cùng guild/kênh (ưu tiên chuỗi reply), phân loại từng message riêng và ghi action cần thực hiện vào outbox.
 5. Bot định kỳ gọi `POST /api/v1/actions/claim`, thực thi action bằng Discord API rồi báo kết quả qua `/complete` hoặc `/fail`.
 6. Bot có thể đọc topic, message và summary để hỗ trợ giao diện riêng.
 
 **Xử lý lặp:** dùng `action_id` làm idempotency key. Action phụ thuộc vào việc tạo thread chỉ được claim sau khi action tạo thread thành công. Payload có thể chứa bản sao message nguồn; bot nên ghi tên tác giả, thời gian và liên kết về message gốc. Discord không thể chuyển message gốc vào thread.
+
+Bot nên gửi từng message gốc ngay khi nhận được và thử lại với cùng `message_id` nếu chưa thấy `202`. Server tự chọn tối đa 6 message ngữ cảnh (chuỗi reply tối đa 3 cấp, phần còn lại trong 10 phút gần nhất), giới hạn 400 ký tự/message và 1.600 ký tự tổng. Các message lân cận có thể thuộc chủ đề khác; AI chỉ quyết định cho message hiện tại. API hiện nhận một message/request và tính rate limit theo từng request; chưa có HTTP batch hay cơ chế chờ gom message.
 
 ## Cấu hình
 
@@ -145,6 +173,12 @@ ruff format --check backend tests scripts
 ```
 
 Suite dùng SQLite cục bộ và provider mock, không gọi Meta API có tính phí. Fixture trong `tests/fixtures/evaluation/` là dữ liệu tổng hợp nhỏ, không đại diện benchmark. Cách chạy metric trên prediction xem [tài liệu kiểm thử](docs/TESTING.md).
+
+## Phân loại topic
+
+Backend lấy tối đa 30 topic còn mở trong cùng guild, xếp hạng cục bộ và gửi tối đa 5 topic gọn cho Meta. Tin nhắn trả lời trực tiếp được ưu tiên; bộ lọc chỉ chọn ứng viên, không tự gắn topic. Meta trả quyết định theo JSON Schema nghiêm ngặt, sau đó backend vẫn kiểm tra guild và trạng thái topic.
+
+Prompt có tiền tố ổn định để Meta có thể tự tái sử dụng cache. Token đầu vào, token cache (nếu API trả về), token đầu ra và độ trễ được lưu cùng quyết định; trường thiếu giữ giá trị chưa biết. Chưa có bộ hội thoại gán nhãn đại diện nên chưa thể kết luận độ chính xác hay mức tiết kiệm token.
 
 ## Tài liệu
 
