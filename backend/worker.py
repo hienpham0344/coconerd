@@ -6,28 +6,15 @@ from contextlib import suppress
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
-from sqlalchemy import delete, select
-from sqlalchemy.dialects.sqlite import insert as sqlite_insert
-
-from backend.application.model_selector import ModelSelector
-from backend.application.services import complete_job, process_message_record
+from backend.application.services.health import record_heartbeat
+from backend.application.services.jobs import claim_job, complete_job, fail_job
+from backend.application.services.messages import process_message_record
+from backend.application.services.model_config import select_worker_settings
+from backend.application.services.retention import prune_retained_data
+from backend.application.services.topics import mark_dormant_topics
 from backend.config import Settings, get_settings
-from backend.domain.enums import JobStatus
 from backend.infrastructure.database.connection import create_session_factory
-from backend.infrastructure.database.models import (
-    AIDecisionRecord,
-    ApiRateLimitRecord,
-    DiscordActionRecord,
-    EpisodeRecord,
-    GuildSettingsRecord,
-    MessageRecord,
-    MessageTopicAssociationRecord,
-    ModelConfigRecord,
-    ProcessingJobRecord,
-    TopicRecord,
-    TopicSummaryRecord,
-    WorkerHeartbeatRecord,
-)
+from backend.infrastructure.database.unit_of_work import SqlAlchemyUnitOfWork
 from backend.infrastructure.meta_provider import MetaModelProvider, MockMetaProvider
 from backend.logging_config import configure_logging
 
@@ -50,42 +37,21 @@ class ConversationWorker:
 
     async def _heartbeat(self, status: str) -> None:
         async with self.session_factory() as session:
-            await session.execute(
-                sqlite_insert(WorkerHeartbeatRecord)
-                .values(worker_id=self.worker_id, status=status, last_seen_at=datetime.now(UTC))
-                .on_conflict_do_update(
-                    index_elements=["worker_id"],
-                    set_={"status": status, "last_seen_at": datetime.now(UTC)},
-                )
-            )
-            await session.commit()
+            await record_heartbeat(SqlAlchemyUnitOfWork(session), self.worker_id, status)
 
     async def _provider_for_guild(self, guild_id: str):
         if self.settings.mock_llm and self.settings.app_env in {"development", "test"}:
             return MockMetaProvider()
-        effective = self.settings
         async with self.session_factory() as session:
-            guild_config = await session.scalar(
-                select(ModelConfigRecord).where(
-                    ModelConfigRecord.scope == "guild", ModelConfigRecord.guild_id == guild_id
-                )
+            effective = await select_worker_settings(
+                SqlAlchemyUnitOfWork(session), self.settings, guild_id
             )
-            global_config = await session.scalar(
-                select(ModelConfigRecord).where(
-                    ModelConfigRecord.scope == "global", ModelConfigRecord.guild_id.is_(None)
-                )
-            )
-            effective = ModelSelector.select(self.settings, guild_config, global_config)
         return MetaModelProvider(effective)
 
     async def process_once(self) -> bool:
         async with self.session_factory() as session:
-            from backend.infrastructure.database.repositories import JobRepository
-
-            job = await JobRepository(session).claim_one(
-                self.worker_id, self.settings.worker_lease_seconds
-            )
-            await session.commit()
+            unit_of_work = SqlAlchemyUnitOfWork(session)
+            job = await claim_job(unit_of_work, self.worker_id, self.settings.worker_lease_seconds)
             if job is None:
                 return False
             job_id = job.id
@@ -96,11 +62,9 @@ class ConversationWorker:
         try:
             provider = await self._provider_for_guild(guild_id)
             async with self.session_factory() as session:
-                await process_message_record(session, message_record_id, provider)
-                job = await session.get(ProcessingJobRecord, job_id)
-                if job is None:
-                    raise LookupError("Claimed processing job disappeared")
-                await complete_job(session, job)
+                unit_of_work = SqlAlchemyUnitOfWork(session)
+                await process_message_record(unit_of_work, message_record_id, provider)
+                await complete_job(unit_of_work, job_id)
             await self._heartbeat("idle")
         except Exception as exc:
             logger.exception(
@@ -119,122 +83,17 @@ class ConversationWorker:
 
     async def _fail_job(self, job_id: str, error_type: str) -> None:
         async with self.session_factory() as session:
-            job = await session.get(ProcessingJobRecord, job_id)
-            if job is None:
-                return
-            delay = min(300, 2 ** min(job.attempt_count, 8))
-            job.status = (
-                JobStatus.PENDING if job.attempt_count < job.max_attempts else JobStatus.DEAD
-            )
-            job.available_at = datetime.now(UTC) + timedelta(seconds=delay)
-            job.lease_owner = None
-            job.lease_expires_at = None
-            job.error_type = error_type
-            await session.commit()
+            await fail_job(SqlAlchemyUnitOfWork(session), job_id, error_type)
 
     async def prune_retained_data(self) -> int:
-        removed = 0
-        now = datetime.now(UTC)
         async with self.session_factory() as session:
-            await session.execute(
-                delete(ApiRateLimitRecord).where(
-                    ApiRateLimitRecord.window_start < now - timedelta(hours=1)
-                )
-            )
-            settings = list(await session.scalars(select(GuildSettingsRecord)))
-            for guild in settings:
-                cutoff = now - timedelta(days=guild.retention_days)
-                old_messages = list(
-                    await session.scalars(
-                        select(MessageRecord).where(
-                            MessageRecord.guild_id == guild.guild_id,
-                            MessageRecord.created_at < cutoff,
-                        )
-                    )
-                )
-                if not old_messages:
-                    continue
-                record_ids = [message.id for message in old_messages]
-                source_ids = {message.discord_message_id for message in old_messages}
-                actions = await session.scalars(
-                    select(DiscordActionRecord).where(
-                        DiscordActionRecord.guild_id == guild.guild_id,
-                        DiscordActionRecord.action_type.in_(["CREATE_THREAD", "APPEND_MESSAGE"]),
-                    )
-                )
-                for action in actions:
-                    if action.payload.get("source_message_id") in source_ids:
-                        action.payload = {
-                            key: value
-                            for key, value in action.payload.items()
-                            if key != "source_content"
-                        }
-                        if action.status in {"PENDING", "CLAIMED"}:
-                            action.status = "DEAD"
-                            action.error_type = "retention_expired"
-                            action.lease_owner = None
-                            action.lease_expires_at = None
-                summaries = list(
-                    await session.scalars(
-                        select(TopicSummaryRecord).where(
-                            TopicSummaryRecord.guild_id == guild.guild_id
-                        )
-                    )
-                )
-                for summary in summaries:
-                    summary.source_message_ids = [
-                        message_id
-                        for message_id in summary.source_message_ids
-                        if message_id not in source_ids
-                    ]
-                await session.execute(
-                    delete(ProcessingJobRecord).where(
-                        ProcessingJobRecord.message_record_id.in_(record_ids)
-                    )
-                )
-                await session.execute(
-                    delete(AIDecisionRecord).where(
-                        AIDecisionRecord.message_record_id.in_(record_ids)
-                    )
-                )
-                await session.execute(
-                    delete(MessageTopicAssociationRecord).where(
-                        MessageTopicAssociationRecord.message_record_id.in_(record_ids)
-                    )
-                )
-                await session.execute(delete(MessageRecord).where(MessageRecord.id.in_(record_ids)))
-                removed += len(record_ids)
-            await session.commit()
-        return removed
+            return await prune_retained_data(SqlAlchemyUnitOfWork(session))
 
     async def mark_dormant_topics(self) -> int:
-        cutoff = datetime.now(UTC) - timedelta(days=self.settings.topic_dormant_after_days)
-        changed = 0
         async with self.session_factory() as session:
-            topics = list(
-                await session.scalars(
-                    select(TopicRecord).where(
-                        TopicRecord.status == "ACTIVE", TopicRecord.last_activity_at < cutoff
-                    )
-                )
+            return await mark_dormant_topics(
+                SqlAlchemyUnitOfWork(session), self.settings.topic_dormant_after_days
             )
-            for topic in topics:
-                topic.status = "DORMANT"
-                episode = await session.scalar(
-                    select(EpisodeRecord)
-                    .where(
-                        EpisodeRecord.guild_id == topic.guild_id,
-                        EpisodeRecord.topic_id == topic.id,
-                        EpisodeRecord.ended_at.is_(None),
-                    )
-                    .order_by(EpisodeRecord.started_at.desc())
-                    .limit(1)
-                )
-                if episode:
-                    episode.ended_at = topic.last_activity_at
-                changed += 1
-            await session.commit()
-        return changed
 
     async def run(self) -> None:
         await self._heartbeat("running")

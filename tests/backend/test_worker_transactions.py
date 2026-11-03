@@ -1,0 +1,169 @@
+"""Worker transaction boundary without a SQLite connection."""
+
+from datetime import UTC, datetime
+from types import SimpleNamespace
+
+from backend import worker as worker_module
+from backend.application.contracts import ClassificationResult, TopicDecision
+from backend.application.read_models import MessageReadModel
+
+
+async def _empty_recent(*_args, **_kwargs):
+    return []
+
+
+async def test_completion_failure_rolls_back_staged_classification(monkeypatch):
+    staged = []
+    durable = []
+    stage_at_failure = []
+    failures = []
+    processing_commits = []
+    rollbacks = []
+    created_at = datetime(2026, 1, 1, tzinfo=UTC)
+
+    class Workflow:
+        async def ainvoke(self, _state):
+            return {
+                "classification": ClassificationResult(
+                    decision=TopicDecision(
+                        outcome="new",
+                        title="Launch",
+                        summary="Launch timing",
+                        confidence=0.8,
+                        reason="new topic",
+                    ),
+                    model_id="fake",
+                    candidate_topic_ids=[],
+                    latency_ms=1,
+                )
+            }
+
+    async def get_message(_id):
+        return MessageReadModel(
+            id="record-1",
+            guild_id="guild-1",
+            channel_id="channel-1",
+            discord_message_id="discord-1",
+            author_id="author-1",
+            author_name="User",
+            content="Launch timing",
+            created_at=created_at,
+            reply_to_message_id=None,
+        )
+
+    async def candidates(_guild):
+        return []
+
+    async def none(*_args):
+        return None
+
+    async def create(topic):
+        staged.append("topic")
+        return SimpleNamespace(
+            id=topic.id,
+            guild_id=topic.guild_id,
+            title=topic.title,
+            description=topic.description,
+            status=topic.status.value,
+            version=1,
+            discord_thread_id=None,
+        )
+
+    async def stage_episode(*_args):
+        staged.append("episode")
+
+    async def stage_association(*_args):
+        staged.append("association")
+
+    async def stage_decision(*_args):
+        staged.append("decision")
+
+    async def stage_touch(*_args):
+        staged.append("touch")
+
+    async def stage_action(*_args, **_kwargs):
+        staged.append("action")
+        return SimpleNamespace(id="action-1")
+
+    async def stage_summary(*_args):
+        staged.append("summary")
+        return SimpleNamespace(id="summary-1", version=1)
+
+    async def fail_completion(_job_id):
+        stage_at_failure.extend(staged)
+        raise LookupError("Claimed processing job disappeared")
+
+    async def claim_one(_owner, _now, _lease_expires_at):
+        return SimpleNamespace(id="job-1", message_record_id="record-1", guild_id="guild-1")
+
+    async def claim_commit():
+        return None
+
+    async def processing_commit():
+        processing_commits.append(True)
+        durable.extend(staged)
+        staged.clear()
+
+    claim_uow = SimpleNamespace(
+        jobs=SimpleNamespace(claim_available=claim_one),
+        commit=claim_commit,
+    )
+    processing_uow = SimpleNamespace(
+        messages=SimpleNamespace(
+            get=get_message,
+            recent_before=_empty_recent,
+            add_association=stage_association,
+            add_decision=stage_decision,
+        ),
+        topics=SimpleNamespace(
+            candidates=candidates,
+            create=create,
+            add_episode=stage_episode,
+            touch=stage_touch,
+        ),
+        summaries=SimpleNamespace(latest=none, add=stage_summary),
+        actions=SimpleNamespace(add=stage_action),
+        jobs=SimpleNamespace(complete=fail_completion),
+        commit=processing_commit,
+    )
+
+    class FakeSession:
+        def __init__(self, uow):
+            self.uow = uow
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, _exc, _tb):
+            if exc_type is not None and self.uow is processing_uow:
+                rollbacks.append(True)
+                staged.clear()
+
+    sessions = iter([FakeSession(claim_uow), FakeSession(processing_uow)])
+    monkeypatch.setattr(worker_module, "SqlAlchemyUnitOfWork", lambda session: session.uow)
+    monkeypatch.setattr(
+        "backend.application.services.messages.create_topic_workflow",
+        lambda _provider: Workflow(),
+    )
+    worker = worker_module.ConversationWorker.__new__(worker_module.ConversationWorker)
+    worker.session_factory = lambda: next(sessions)
+    worker.settings = SimpleNamespace(worker_lease_seconds=30)
+    worker.worker_id = "worker-1"
+
+    async def provider_for_guild(_guild_id):
+        return SimpleNamespace(model_id="fake")
+
+    async def fail_job(job_id, error_type):
+        failures.append((job_id, error_type))
+
+    worker._provider_for_guild = provider_for_guild
+    worker._fail_job = fail_job
+    assert await worker.process_once() is True
+    assert {"topic", "episode", "association", "decision", "summary", "action"} <= set(
+        stage_at_failure
+    )
+    assert processing_commits == []
+    assert durable == []
+    assert staged == []
+    assert rollbacks == [True]
+    assert failures == [("job-1", "LookupError")]

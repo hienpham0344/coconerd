@@ -45,3 +45,10 @@ async def unauthenticated_api_client(tmp_path) -> AsyncIterator[AsyncClient]:
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         yield client
     await engine.dispose()
+
+
+@pytest_asyncio.fixture
+def unit_of_work_factory():
+    from backend.infrastructure.database.unit_of_work import SqlAlchemyUnitOfWork
+
+    return SqlAlchemyUnitOfWork

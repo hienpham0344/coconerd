@@ -26,6 +26,32 @@ def read_jsonl(path: Path, key: str) -> dict[str, str | None]:
     return rows
 
 
+def read_candidate_ids_jsonl(path: Path) -> dict[str, list[str]]:
+    rows: dict[str, list[str]] = {}
+    for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+        if not line.strip():
+            continue
+        try:
+            record: dict[str, Any] = json.loads(line)
+            message_id = record["message_id"]
+            candidate_ids = record["candidate_topic_ids"]
+        except (json.JSONDecodeError, KeyError, TypeError) as exc:
+            raise ValueError(
+                f"Invalid {path}:{line_number}; expected message_id and candidate_topic_ids"
+            ) from exc
+        if (
+            not isinstance(message_id, str)
+            or not message_id
+            or not isinstance(candidate_ids, list)
+            or any(not isinstance(topic_id, str) or not topic_id for topic_id in candidate_ids)
+        ):
+            raise ValueError(
+                f"Invalid {path}:{line_number}; candidate_topic_ids must be a list of strings"
+            )
+        rows[message_id] = candidate_ids
+    return rows
+
+
 def pairwise_scores(
     gold: dict[str, str | None], predictions: dict[str, str | None]
 ) -> dict[str, float | int]:
@@ -51,16 +77,38 @@ def pairwise_scores(
     }
 
 
+def candidate_recall_at_k(
+    gold: dict[str, str | None],
+    candidate_topic_ids: dict[str, list[str]],
+    k: int = 5,
+) -> dict[str, float | int]:
+    """Measure whether each labeled topic appears in a prediction's shortlist."""
+    if k < 1:
+        raise ValueError("k must be at least 1")
+    common = [
+        message_id
+        for message_id, topic_id in gold.items()
+        if topic_id is not None and message_id in candidate_topic_ids
+    ]
+    hits = sum(gold[message_id] in candidate_topic_ids[message_id][:k] for message_id in common)
+    return {
+        "messages_with_gold_topic": len(common),
+        "retrieved_gold_topics": hits,
+        "candidate_recall_at_k": hits / len(common) if common else 0.0,
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("gold", type=Path, help="JSONL with message_id and expected_topic_id")
-    parser.add_argument(
-        "predictions", type=Path, help="JSONL with message_id and predicted_topic_id"
-    )
+    parser.add_argument("predictions", type=Path, help="JSONL prediction rows")
     args = parser.parse_args()
     gold = read_jsonl(args.gold, "expected_topic_id")
     predictions = read_jsonl(args.predictions, "predicted_topic_id")
-    print(json.dumps(pairwise_scores(gold, predictions), indent=2, sort_keys=True))
+    report = pairwise_scores(gold, predictions)
+    candidate_ids = read_candidate_ids_jsonl(args.predictions)
+    report.update(candidate_recall_at_k(gold, candidate_ids, k=5))
+    print(json.dumps(report, indent=2, sort_keys=True))
 
 
 if __name__ == "__main__":

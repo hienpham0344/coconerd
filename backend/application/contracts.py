@@ -1,8 +1,10 @@
+from collections.abc import Sequence
 from datetime import datetime
 from typing import Literal, Protocol
 
 from pydantic import BaseModel, Field
 
+from backend.application.read_models import ContextMessage
 from backend.domain.entities import ConversationMessage
 
 
@@ -29,12 +31,25 @@ class TopicDecision(BaseModel):
     summary: str = ""
 
 
+class ClassificationResult(BaseModel):
+    decision: TopicDecision
+    model_id: str
+    candidate_topic_ids: list[str] = Field(default_factory=list)
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
+    cached_tokens: int | None = None
+    latency_ms: int
+
+
 class ModelProvider(Protocol):
     model_id: str
 
     async def classify(
-        self, message: ConversationMessage, candidates: list[TopicCandidate]
-    ) -> TopicDecision: ...
+        self,
+        message: ConversationMessage,
+        candidates: list[TopicCandidate],
+        context: Sequence[ContextMessage] = (),
+    ) -> ClassificationResult: ...
 
 
 class Clock(Protocol):

@@ -1,11 +1,13 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import func, select
 
-from backend.application.services import ingest_message, process_message_record
+from backend.application.contracts import ClassificationResult, TopicDecision
+from backend.application.services.messages import ingest_message, process_message_record
 from backend.domain.entities import ConversationMessage
 from backend.domain.enums import AssociationKind
 from backend.infrastructure.database.models import (
+    AIDecisionRecord,
     DiscordActionRecord,
     EpisodeRecord,
     GuildSettingsRecord,
@@ -14,6 +16,7 @@ from backend.infrastructure.database.models import (
     TopicRecord,
     TopicSummaryRecord,
 )
+from backend.infrastructure.database.unit_of_work import SqlAlchemyUnitOfWork
 from backend.infrastructure.meta_provider import MockMetaProvider
 
 
@@ -37,9 +40,11 @@ async def test_offline_worker_creates_topic_summary_and_outbox(database_factory)
             )
         )
         await session.commit()
-        record, inserted = await ingest_message(session, message, max_attempts=3)
-        assert inserted
-        await process_message_record(session, record.id, MockMetaProvider())
+        result = await ingest_message(SqlAlchemyUnitOfWork(session), message, max_attempts=3)
+        assert result.inserted
+        await process_message_record(
+            SqlAlchemyUnitOfWork(session), result.message_id, MockMetaProvider()
+        )
         await session.commit()
 
     async with database_factory() as session:
@@ -74,8 +79,10 @@ async def test_late_reply_uses_same_guild_topic_and_resumes_episode(database_fac
             content="Let's plan the launch timeline.",
             created_at=datetime.now(UTC),
         )
-        record, _ = await ingest_message(session, first, max_attempts=3)
-        await process_message_record(session, record.id, MockMetaProvider())
+        result = await ingest_message(SqlAlchemyUnitOfWork(session), first, max_attempts=3)
+        await process_message_record(
+            SqlAlchemyUnitOfWork(session), result.message_id, MockMetaProvider()
+        )
         await session.commit()
         topic = await session.scalar(select(TopicRecord))
         assert topic is not None
@@ -93,13 +100,15 @@ async def test_late_reply_uses_same_guild_topic_and_resumes_episode(database_fac
             created_at=datetime.now(UTC),
             reply_to_message_id="root-message",
         )
-        reply_record, _ = await ingest_message(session, reply, max_attempts=3)
-        await process_message_record(session, reply_record.id, MockMetaProvider())
+        reply_result = await ingest_message(SqlAlchemyUnitOfWork(session), reply, max_attempts=3)
+        await process_message_record(
+            SqlAlchemyUnitOfWork(session), reply_result.message_id, MockMetaProvider()
+        )
         await session.commit()
 
         association = await session.scalar(
             select(MessageTopicAssociationRecord).where(
-                MessageTopicAssociationRecord.message_record_id == reply_record.id
+                MessageTopicAssociationRecord.message_record_id == reply_result.message_id
             )
         )
         topic = await session.get(TopicRecord, topic_id)
@@ -114,3 +123,50 @@ async def test_late_reply_uses_same_guild_topic_and_resumes_episode(database_fac
             )
             == 2
         )
+
+
+async def test_decision_records_selected_context_message_ids(database_factory):
+    class RecordingProvider:
+        model_id = "test"
+
+        async def classify(self, message, candidates, context):
+            assert message.message_id == "target"
+            assert [item.message_id for item in context] == ["prior"]
+            return ClassificationResult(
+                decision=TopicDecision(outcome="defer", confidence=0.2, reason="uncertain"),
+                model_id=self.model_id,
+                latency_ms=1,
+            )
+
+    async with database_factory() as session:
+        session.add(
+            GuildSettingsRecord(
+                guild_id="guild-1",
+                enabled=True,
+                allowed_channel_ids=["channel-1"],
+                retention_days=365,
+            )
+        )
+        await session.commit()
+        created_at = datetime.now(UTC)
+        for message_id, offset in [("prior", -1), ("target", 0)]:
+            incoming = ConversationMessage(
+                guild_id="guild-1",
+                channel_id="channel-1",
+                message_id=message_id,
+                author_id="user-1",
+                author_name="Hien",
+                content=message_id,
+                created_at=created_at + timedelta(minutes=offset),
+            )
+            result = await ingest_message(SqlAlchemyUnitOfWork(session), incoming, 3)
+            if message_id == "target":
+                target_id = result.message_id
+        await process_message_record(SqlAlchemyUnitOfWork(session), target_id, RecordingProvider())
+        await session.commit()
+
+        decision = await session.scalar(
+            select(AIDecisionRecord).where(AIDecisionRecord.message_record_id == target_id)
+        )
+        assert decision is not None
+        assert decision.payload["context_message_ids"] == ["prior"]
