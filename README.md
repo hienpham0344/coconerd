@@ -1,24 +1,28 @@
-# Discord Conversation Organizer — Backend
+# Discord Conversation Organizer
 
-Backend Python độc lập để gom hội thoại Discord theo chủ đề. Backend lưu tin nhắn trước, xử lý AI ở worker riêng, duy trì topic và summary, rồi tạo action để một Discord bot bên ngoài thực thi.
+**Backend độc lập để gom hội thoại Discord theo chủ đề.** API nhận và lưu message trước; worker phân loại, cập nhật topic/summary và tạo action để Discord bot bên ngoài xử lý.
 
-> **Phạm vi:** repository này chỉ chứa backend. Không có Discord bot, Discord SDK, token bot hay bước đăng nhập Discord. Bot do thành viên khác phát triển có thể tích hợp qua HTTP API trong [`docs/API_CONTRACT.md`](docs/API_CONTRACT.md).
+> [!NOTE]
+> Repository này chỉ chứa backend. Không có bot, Discord SDK, bot token hay bước đăng nhập Discord. Bot do thành viên khác phát triển sẽ tích hợp qua [HTTP API](docs/API_CONTRACT.md).
 
-## Chức năng
+```text
+Discord bot → Backend API → SQLite job queue → AI worker → Topics, summaries, actions → Discord bot
+```
 
-- Nhận message từ bot qua API có API key; chỉ chấp nhận guild/channel được admin cho phép.
-- Lưu message và processing job trong cùng transaction, hỗ trợ gửi lặp mà không tạo bản ghi/job trùng.
-- Phân nhóm message vào topic, tiếp tục topic qua reply, lưu episode, association và phiên bản summary.
-- Chạy Meta Model API qua OpenAI-compatible endpoint; hỗ trợ mock cục bộ để phát triển offline.
-- Ghi các yêu cầu tạo/cập nhật Discord thread vào transactional outbox. Bot claim action, thực hiện Discord API, rồi báo hoàn tất hoặc lỗi.
-- Có lease, retry giới hạn, rate limit, giới hạn kích thước request, retention dữ liệu và endpoint quản trị.
+## Nội dung
 
-## Yêu cầu
+- [Chạy nhanh](#chạy-nhanh)
+- [Tính năng](#tính-năng)
+- [Tích hợp bot](#tích-hợp-bot)
+- [Cấu hình](#cấu-hình)
+- [API chính](#api-chính)
+- [Kiểm tra và đánh giá](#kiểm-tra-và-đánh-giá)
+- [Tài liệu](#tài-liệu)
+- [Lưu ý triển khai](#lưu-ý-triển-khai)
 
-- Python 3.12 trở lên.
-- Meta Model API key nếu muốn phân loại bằng model thật. Không cần key để dùng mock mode.
+## Chạy nhanh
 
-## Cài đặt và chạy local
+**Yêu cầu:** Python 3.12 trở lên. Cần Meta Model API key để chạy model thật; mock mode chạy offline.
 
 ```bash
 python3.12 -m venv .venv
@@ -28,25 +32,25 @@ python -m pip install -e '.[dev]'
 cp .env.example .env
 ```
 
-`.env.example` giữ lại cấu hình mẫu có sẵn của workspace và bổ sung nhóm biến `COCONERD_*` cho backend này. Chỉnh các giá trị `replace-with-...` trong `.env`; dùng hai API key ngẫu nhiên, riêng biệt cho bot và admin. Không commit `.env`.
+Trong `.env`, đặt hai giá trị ngẫu nhiên, riêng biệt cho `COCONERD_BOT_API_KEY` và `COCONERD_ADMIN_API_KEY`. Chỉnh `COCONERD_MODEL_API_KEY` nếu dùng model thật. Không commit `.env`.
 
-Khởi tạo database rồi chạy API:
+Khởi tạo database và chạy API:
 
 ```bash
 alembic upgrade head
 organizer-api
 ```
 
-Chạy worker trong terminal khác:
+Mở terminal khác để chạy worker:
 
 ```bash
 source .venv/bin/activate
 organizer-worker
 ```
 
-API mặc định ở `http://localhost:8000`; Swagger UI ở `/docs`, OpenAPI JSON ở `/openapi.json`. API và worker là hai process riêng. API trả `202 Accepted` sau khi message cùng job đã commit; worker xử lý sau đó.
+API mặc định ở `http://localhost:8000`; Swagger UI ở `/docs`, OpenAPI JSON ở `/openapi.json`. API trả `202 Accepted` sau khi message và job đã commit; worker xử lý message sau đó.
 
-### Chạy mock không cần Meta key
+### Chạy offline bằng mock
 
 Trong `.env` đặt:
 
@@ -55,52 +59,70 @@ COCONERD_APP_ENV=development
 COCONERD_MOCK_LLM=true
 ```
 
-Mock chạy có chủ đích đơn giản để kiểm thử luồng tích hợp; nó không mô phỏng chất lượng Meta và không phải kết quả benchmark. Mock chỉ được bật trong `development` hoặc `test`.
+Mock chỉ chạy trong môi trường `development` hoặc `test`. Nó giúp kiểm thử luồng tích hợp, không mô phỏng chất lượng Meta và không tạo kết quả benchmark.
+
+## Tính năng
+
+- **Ingest bền vững:** lưu message và job trong cùng transaction; delivery trùng không tạo bản ghi hoặc job mới.
+- **Phân nhóm theo topic:** dùng model để chọn topic hiện có, tạo topic mới, defer trường hợp chưa chắc chắn hoặc bỏ qua nội dung không liên quan.
+- **Memory và summary:** lưu association, episode và các phiên bản summary theo topic.
+- **Outbox cho Discord:** ghi action cùng transaction với cập nhật topic; bot claim, thực thi và ACK action qua API.
+- **Vận hành an toàn hơn:** API key riêng cho bot/admin, allowlist guild/channel, rate limit, giới hạn request, retry có giới hạn và retention dữ liệu.
+
+## Tích hợp bot
+
+1. Admin bật guild và allowlist channel bằng `PUT /api/v1/admin/guilds/{guild_id}/settings`.
+2. Bot gửi message đến `POST /api/v1/messages` với header `X-API-Key`. Gửi Discord message ID, guild/channel, tác giả, nội dung và timestamp có timezone; reply có thể kèm `reply_to_message_id`.
+3. Backend lưu message/job và trả `202`; bot không phải chờ model phân loại.
+4. Worker phân loại message và ghi action cần thực hiện vào outbox.
+5. Bot định kỳ gọi `POST /api/v1/actions/claim`, thực thi action bằng Discord API rồi báo kết quả qua `/complete` hoặc `/fail`.
+6. Bot có thể đọc topic, message và summary để hỗ trợ giao diện riêng.
+
+**Xử lý lặp:** dùng `action_id` làm idempotency key. Action phụ thuộc vào việc tạo thread chỉ được claim sau khi action tạo thread thành công. Payload có thể chứa bản sao message nguồn; bot nên ghi tên tác giả, thời gian và liên kết về message gốc. Discord không thể chuyển message gốc vào thread.
 
 ## Cấu hình
 
-Backend ưu tiên tên biến `COCONERD_*`; một số tên cũ vẫn được nhận để tương thích. Các giá trị mặc định chính:
+Backend ưu tiên biến `COCONERD_*`; một số tên cũ vẫn được nhận để tương thích. `.env.example` giữ cấu hình mẫu có sẵn của workspace và bổ sung các biến cho backend này.
+
+<details>
+<summary>Hiện cấu hình và giá trị mặc định</summary>
 
 | Biến | Mặc định | Mục đích |
 | --- | --- | --- |
-| `COCONERD_APP_ENV` | `development` | Môi trường; mock chỉ khả dụng ở `development`/`test` |
+| `COCONERD_APP_ENV` | `development` | Mock chỉ khả dụng ở `development`/`test` |
 | `COCONERD_HOST` / `COCONERD_PORT` | `0.0.0.0` / `8000` | Địa chỉ API bind |
 | `COCONERD_DATABASE_URL` | `sqlite+aiosqlite:///./data/coconerd.db` | SQLite async database |
-| `COCONERD_BOT_API_KEY` | chưa đặt | Key riêng cho API của bot |
-| `COCONERD_ADMIN_API_KEY` | chưa đặt | Key riêng cho endpoint quản trị |
-| `COCONERD_MODEL_API_KEY` | chưa đặt | Credential gọi Meta Model API |
+| `COCONERD_BOT_API_KEY` | Chưa đặt | Key riêng cho API bot |
+| `COCONERD_ADMIN_API_KEY` | Chưa đặt | Key riêng cho API admin |
+| `COCONERD_MODEL_API_KEY` | Chưa đặt | Credential gọi Meta Model API |
 | `COCONERD_META_API_BASE` | `https://api.meta.ai/v1` | API base URL |
 | `COCONERD_META_MODEL_NAME` | `muse-spark-1.3` | Model ID mặc định |
 | `COCONERD_MOCK_LLM` | `false` | Bật provider mock khi phát triển/kiểm thử |
 | `COCONERD_WORKER_POLL_SECONDS` | `1` | Thời gian chờ khi không có job |
 | `COCONERD_WORKER_LEASE_SECONDS` | `60` | Thời hạn lease cho job |
-| `COCONERD_WORKER_MAX_ATTEMPTS` | `5` | Số lần xử lý tối đa |
+| `COCONERD_WORKER_MAX_ATTEMPTS` | `5` | Số lần xử lý job tối đa |
 | `COCONERD_ACTION_LEASE_SECONDS` | `60` | Thời hạn bot giữ action |
 | `COCONERD_MAX_REQUEST_BYTES` | `65536` | Giới hạn kích thước request |
 | `COCONERD_MAX_MESSAGE_LENGTH` | `8000` | Giới hạn nội dung một message |
-| `COCONERD_RETENTION_DAYS` | `365` | Thời gian lưu message mặc định cho guild |
-| `COCONERD_TOPIC_DORMANT_AFTER_DAYS` | `30` | Sau thời gian này topic không hoạt động chuyển sang dormant |
+| `COCONERD_RETENTION_DAYS` | `365` | Retention mặc định cho guild |
+| `COCONERD_TOPIC_DORMANT_AFTER_DAYS` | `30` | Số ngày trước khi topic inactive thành dormant |
 
-Các biến model khác như `LLM_TEMPERATURE`, `LLM_MAX_TOKENS`, `COCONERD_CORS_ORIGINS` và `COCONERD_LOG_LEVEL` được mô tả trong [`docs/MODEL_CONFIGURATION.md`](docs/MODEL_CONFIGURATION.md) và file mẫu.
+Các biến `LLM_TEMPERATURE`, `LLM_MAX_TOKENS`, `COCONERD_CORS_ORIGINS` và `COCONERD_LOG_LEVEL` được mô tả trong [cấu hình model](docs/MODEL_CONFIGURATION.md) và file mẫu.
 
-## Luồng tích hợp cho Discord bot
-
-1. Admin gọi `PUT /api/v1/admin/guilds/{guild_id}/settings` để bật guild và allowlist channel.
-2. Bot gửi message đến `POST /api/v1/messages` với header `X-API-Key`. Message cần có ID Discord, guild/channel, tác giả, nội dung và timestamp có timezone; reply có thể gửi `reply_to_message_id`.
-3. Backend lưu message/job và trả `202`; bot không cần đợi model chạy xong.
-4. Worker phân loại message và ghi các action cần thiết vào outbox.
-5. Bot định kỳ gọi `POST /api/v1/actions/claim`, thực thi action bằng Discord API, rồi gọi endpoint `/complete` hoặc `/fail` tương ứng.
-6. Bot có thể đọc topic, message và summary qua API để hỗ trợ giao diện riêng.
-
-Bot nên coi `action_id` là idempotency key. Action phụ thuộc vào việc tạo thread sẽ chỉ được claim sau khi action tạo thread hoàn tất. Payload action có thể chứa bản sao nội dung message nguồn; bot chỉ nên đăng nội dung được yêu cầu, ghi tác giả/thời gian và liên kết message gốc. Xem schema request/response và mã lỗi tại [`docs/API_CONTRACT.md`](docs/API_CONTRACT.md).
+</details>
 
 ## API chính
 
+Bot dùng `X-API-Key`; admin dùng key riêng `X-Admin-API-Key`. Topic read luôn cần `guild_id`; ID thuộc guild khác trả `404`.
+
+<details>
+<summary>Hiện danh sách endpoint chính</summary>
+
 | Method | Path | Quyền | Mục đích |
 | --- | --- | --- | --- |
-| `POST` | `/api/v1/messages` | Bot | Ingest message và enqueue job bền vững |
-| `POST` | `/api/v1/actions/claim` | Bot | Claim các action sẵn sàng xử lý |
-| `POST` | `/api/v1/actions/{action_id}/complete` | Bot | ACK action đã chạy thành công |
+| `POST` | `/api/v1/messages` | Bot | Ingest message và enqueue job |
+| `POST` | `/api/v1/actions/claim` | Bot | Claim action sẵn sàng xử lý |
+| `POST` | `/api/v1/actions/{action_id}/complete` | Bot | ACK action thành công |
 | `POST` | `/api/v1/actions/{action_id}/fail` | Bot | Báo lỗi để retry hoặc kết thúc action |
 | `GET` | `/api/v1/topics/{topic_id}` | Bot | Đọc topic trong guild |
 | `GET` | `/api/v1/topics/{topic_id}/messages` | Bot | Đọc message theo trang |
@@ -110,7 +132,9 @@ Bot nên coi `action_id` là idempotency key. Action phụ thuộc vào việc t
 | `POST` | `/api/v1/admin/topics/{topic_id}/close` | Admin | Đóng topic rõ ràng |
 | `GET` | `/api/v1/health` | Public | Kiểm tra database và heartbeat worker |
 
-Bot dùng `X-API-Key`; admin dùng key riêng `X-Admin-API-Key`. Topic read luôn cần `guild_id`; ID thuộc guild khác trả `404`. API contract đầy đủ có trong [`docs/API_CONTRACT.md`](docs/API_CONTRACT.md).
+</details>
+
+Request/response, headers, rate limit và mã lỗi được mô tả trong [API contract](docs/API_CONTRACT.md). Các endpoint admin khác gồm đóng/xóa topic và xóa dữ liệu guild.
 
 ## Kiểm tra và đánh giá
 
@@ -120,21 +144,23 @@ ruff check backend tests scripts
 ruff format --check backend tests scripts
 ```
 
-Kiểm thử dùng SQLite cục bộ và provider mock, không gọi Meta API có tính phí. Bộ fixture tại `tests/fixtures/evaluation/` chỉ là dữ liệu tổng hợp nhỏ, không đại diện benchmark. Cách chạy metric trên nhãn/prediction của bạn xem [`docs/TESTING.md`](docs/TESTING.md).
+Suite dùng SQLite cục bộ và provider mock, không gọi Meta API có tính phí. Fixture trong `tests/fixtures/evaluation/` là dữ liệu tổng hợp nhỏ, không đại diện benchmark. Cách chạy metric trên prediction xem [tài liệu kiểm thử](docs/TESTING.md).
 
 ## Tài liệu
 
-- [API contract cho bot và admin](docs/API_CONTRACT.md)
-- [Kiến trúc backend](docs/BACKEND_ARCHITECTURE.md)
-- [Schema dữ liệu](docs/DATA_SCHEMA.md)
-- [Agent workflow](docs/AGENT_WORKFLOW.md)
-- [Cấu hình model](docs/MODEL_CONFIGURATION.md)
-- [Kiểm thử và đánh giá](docs/TESTING.md)
+| Tài liệu | Nội dung |
+| --- | --- |
+| [API contract](docs/API_CONTRACT.md) | Tích hợp bot/admin, schema và mã lỗi |
+| [Kiến trúc](docs/BACKEND_ARCHITECTURE.md) | Ranh giới thành phần và độ tin cậy |
+| [Schema dữ liệu](docs/DATA_SCHEMA.md) | Các bảng và quan hệ persistence |
+| [Agent workflow](docs/AGENT_WORKFLOW.md) | Quy trình phân loại và cập nhật topic |
+| [Cấu hình model](docs/MODEL_CONFIGURATION.md) | Provider, model và cấu hình override |
+| [Kiểm thử](docs/TESTING.md) | Test suite và công cụ đánh giá |
 
 ## Lưu ý triển khai
 
-- Chạy `alembic upgrade head` trước khi khởi động API/worker; ứng dụng không tự tạo hoặc tự migrate schema lúc startup.
-- SQLite phù hợp cho chạy local hoặc một host dùng chung file local. Khi cần nhiều host/ghi đồng thời cao, cần chuyển database/queue phù hợp trước khi scale.
-- Nếu bot chạy trên máy khác, giới hạn truy cập cổng API ở firewall cho host đó và dùng TLS qua reverse proxy. Không expose API công khai với HTTP không bảo vệ.
-- Health endpoint báo trạng thái database và heartbeat gần nhất của worker; nó không đo mức tiến triển của từng job.
-- Dữ liệu hội thoại được lưu theo retention của guild. Hãy cấu hình chính sách lưu trữ phù hợp với server trước khi ingest.
+- Chạy `alembic upgrade head` trước khi khởi động API/worker; ứng dụng không tự tạo hoặc migrate schema khi startup.
+- SQLite phù hợp cho local hoặc một host dùng file local. Trước khi chạy nhiều host hay tăng tải ghi đồng thời, cần chuyển sang database/queue phù hợp.
+- Nếu bot ở máy khác, giới hạn cổng API bằng firewall cho host đó và dùng TLS qua reverse proxy. Không expose API công khai bằng HTTP không bảo vệ.
+- Health endpoint báo trạng thái database và heartbeat worker gần nhất; nó không đo tiến triển của từng job.
+- Message tuân theo retention của guild. Cấu hình chính sách lưu trữ phù hợp trước khi ingest.
