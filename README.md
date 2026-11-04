@@ -30,10 +30,12 @@ python3.12 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -e '.[dev]'
-cp .env.example .env
+if [ ! -f .env ]; then cp .env.example .env; fi
 ```
 
 Trong `.env`, đặt hai giá trị ngẫu nhiên, riêng biệt cho `COCONERD_BOT_API_KEY` và `COCONERD_ADMIN_API_KEY`. Chỉnh `COCONERD_MODEL_API_KEY` nếu dùng model thật. Không commit `.env`.
+
+Chạy các lệnh từ thư mục gốc của cùng một bản checkout. Backend đọc `.env` trong **thư mục chạy lệnh**; `.env.example` chỉ là mẫu, không được tự nạp và không dùng để lưu key thật. Mỗi worktree có file riêng, nên API và worker cần chạy từ cùng checkout để dùng chung cấu hình và đường dẫn SQLite. Sau khi sửa `.env`, khởi động lại tiến trình đang chạy. Kiểm thử riêng Meta không cần bot/admin key.
 
 Khởi tạo database và chạy API:
 
@@ -69,12 +71,15 @@ Mock chỉ chạy trong môi trường `development` hoặc `test`. Nó giúp ki
 - **Tìm lại topic cũ:** chỉ mục từ khóa trong SQLite, chuẩn hóa dấu và alias; không giới hạn tìm kiếm ở 30 topic gần nhất.
 - **Chờ ngữ cảnh:** tin thiếu ngữ cảnh được xét lại tối đa một lần khi có lời giải thích phù hợp; giới hạn hai lượt gọi model cho mỗi message, kể cả lượt lỗi.
 - **Memory và summary:** lưu association, episode và các phiên bản summary theo topic.
+- **Sửa phân loại có lịch sử:** admin sửa association/summary bằng revision, tạm dừng đồng bộ để đối chiếu Discord và khôi phục action lỗi có audit. Xem [hướng dẫn review](docs/MANUAL_REVIEW.md).
 - **Outbox cho Discord:** ghi action cùng transaction với cập nhật topic; bot claim, thực thi và ACK action qua API.
 - **Vận hành an toàn hơn:** API key riêng cho bot/admin, allowlist guild/channel, rate limit, giới hạn request, retry có giới hạn và retention dữ liệu.
 
 ## Cấu trúc backend và lưu trữ
 
-Backend là một ứng dụng chia theo nghiệp vụ: `messages`, `topics`, `actions`, `guilds`, `model_config` và `health`. HTTP và worker gọi cùng lớp use case; persistence được truy cập qua repository và Unit of Work.
+Xem [báo cáo năng lực, điểm yếu và mức độ hoàn thiện](docs/BACKEND_READINESS.md).
+
+Backend là một ứng dụng chia theo nghiệp vụ: `messages`, `topics`, `actions`, `reviews`, `guilds`, `model_config` và `health`. HTTP và worker gọi cùng lớp use case; persistence được truy cập qua repository và Unit of Work.
 
 ```text
 backend/
@@ -103,7 +108,7 @@ Xem [kiến trúc backend](docs/BACKEND_ARCHITECTURE.md) để tra module, trans
 2. Bot gửi message đến `POST /api/v1/messages` với header `X-API-Key`. Gửi Discord message ID, guild/channel, tác giả, nội dung và timestamp có timezone; reply có thể kèm `reply_to_message_id`.
 3. Backend lưu message/job và trả `202`; bot không phải chờ model phân loại.
 4. Worker chọn ngữ cảnh giới hạn từ các message trước đó cùng guild/kênh (ưu tiên chuỗi reply), phân loại từng message riêng và ghi action cần thực hiện vào outbox.
-5. Bot định kỳ gọi `POST /api/v1/actions/claim`, thực thi action bằng Discord API rồi báo kết quả qua `/complete` hoặc `/fail`.
+5. Bot định kỳ gọi `POST /api/v1/actions/claim`, thực thi action bằng Discord API rồi báo kết quả qua `/complete` hoặc `/fail`, kèm `lease_token` nhận từ claim.
 6. Bot có thể đọc topic, message và summary để hỗ trợ giao diện riêng.
 
 **Xử lý lặp:** dùng `action_id` làm idempotency key. Action phụ thuộc vào việc tạo thread chỉ được claim sau khi action tạo thread thành công. Payload có thể chứa bản sao message nguồn; bot nên ghi tên tác giả, thời gian và liên kết về message gốc. Discord không thể chuyển message gốc vào thread.
@@ -180,7 +185,7 @@ Suite dùng SQLite cục bộ và provider mock, không gọi Meta API có tính
 
 Backend hợp nhất tối đa 30 topic từ chỉ mục tìm kiếm với 30 topic gần đây trong cùng guild, xếp hạng cục bộ và gửi tối đa 5 topic gọn cho Meta. Topic cũ còn mở vẫn có thể được tìm thấy. Context giới hạn 6 tin/1.600 ký tự; reply và lời giải thích được ưu tiên, nhưng không tự động chứng minh cùng topic.
 
-Policy `topic-policy-v3` yêu cầu evidence chứa ID tin gốc, chỉ dùng ID đã cung cấp và topic nằm trong shortlist. Input nhiều chủ đề được `defer`; title trùng không tự ép gộp. Backend kiểm tra lại trạng thái topic trước khi ghi association/summary/action. Kiểm tra ID không chứng minh model hiểu đúng nghĩa; confidence chưa được hiệu chỉnh thành xác suất đúng.
+Policy `topic-policy-v4` yêu cầu evidence chứa ID tin gốc, chỉ dùng ID đã cung cấp và topic nằm trong shortlist. Input nhiều chủ đề được `defer`; title trùng không tự ép gộp. Backend kiểm tra lại trạng thái topic trước khi ghi association/summary/action. Assignment dưới confidence 0.7 được defer. Memory giữ facts cũ và chỉ cho thay/xóa bằng tham chiếu/quote hợp lệ. Kiểm tra ID không chứng minh model hiểu đúng nghĩa; confidence chưa được hiệu chỉnh thành xác suất đúng.
 
 Tin rỗng thành `irrelevant`; câu xác nhận như `ok` không có điểm tham chiếu thành `defer`, đều không gọi Meta. Tin `defer` vì thiếu ngữ cảnh hoặc mơ hồ có thể chờ lời giải thích cùng channel trong 10 phút và xét lại một lần. Association đã gán topic không tự đổi. Mỗi message được đặt chỗ tối đa hai lượt gọi model qua mọi lần retry; lỗi hoặc crash sau đặt chỗ vẫn có thể tiêu hao hạn mức.
 

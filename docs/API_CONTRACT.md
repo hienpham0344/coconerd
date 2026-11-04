@@ -2,6 +2,8 @@
 
 Base path: `/api/v1`. JSON is UTF-8. Bot routes require `X-API-Key`; administrator routes require the separate `X-Admin-API-Key`. Responses include `X-Request-ID`. Requests exceeding `MAX_REQUEST_BYTES` return `413`; rate limits return `429` with `Retry-After`.
 
+Topic summary reads share the bot request rate limit. Empty or whitespace-only configured credentials fail closed with `503`; invalid supplied keys, including non-ASCII values, return `401`.
+
 ## Configure guild access
 
 `PUT /admin/guilds/{guild_id}/settings`
@@ -92,3 +94,19 @@ All topic reads require `guild_id`; cross-guild IDs return `404`. Message pagina
 - `422`: invalid JSON/schema, invalid timestamp, or missing thread ID on create completion.
 - `429`: rate limit reached; honor `Retry-After`.
 - `503`: corresponding API credential is not configured.
+
+## Moderator review (additive)
+
+Five administrator endpoints under `/api/v1/guilds/{guild_id}` use `X-Admin-API-Key`:
+
+- `GET /messages/{message_id}/review`: source text, association revision, job/call budget, latest decision/correction.
+- `POST /messages/{message_id}/corrections`: revision-checked assignment and full reviewed memory snapshots.
+- `GET /topics/{topic_id}/sync?limit=50&offset=0`: version, pause state and action history (limit 1–100).
+- `POST /topics/{topic_id}/resume-sync`: confirms external reconciliation against the latest topic version.
+- `POST /actions/{action_id}/recover`: audited resolution of DEAD or expired CLAIMED work.
+
+`message_id` here is the Discord message ID. `request_id` is required on every write and unique across review operations in a guild: identical retries return the original receipt, changed bodies return 409. `actor` is a moderator-supplied label under a shared admin key, not verified Discord user authentication. Missing/cross-guild resources return 404; stale revisions, live leases and superseded actions return 409; invalid sources/command fields return 422. All writes are transactional; no paid model call or direct Discord request occurs.
+
+See [manual review examples and reconciliation rules](MANUAL_REVIEW.md). Existing endpoints and fields remain. Action claim responses now add `lease_token`; clients must echo it in complete/fail for newly claimed actions (missing/stale token → 409). This is a required bot integration update; existing un-tokenized leases remain compatible until their next claim.
+
+Action lease fencing uses status, owner, expiry and per-claim token; reusing worker_id cannot authorize an ACK from an older claim.

@@ -8,6 +8,7 @@ Backend là modular monolith: một codebase, API và worker chạy thành hai t
 | --- | --- | --- | --- |
 | Nhận và phân loại message | `routers/messages.py` | `services/messages.py` | `repositories/messages.py`, `jobs.py` |
 | Topic, message theo topic, summary và vòng đời | `routers/topics.py` | `services/topics.py` | `repositories/topics.py`, `summaries.py` |
+| Review, sửa topic và đối chiếu Discord | `routers/reviews.py` | `services/message_review.py`, `review_operations.py`, `review_audit.py` | `repositories/reviews.py`, `review_queries.py`, `action_recovery.py` |
 | Claim và ACK action | `routers/actions.py` | `services/actions.py` | `repositories/actions.py` |
 | Guild, channel allowlist và xóa dữ liệu | `routers/guilds.py` | `services/guilds.py` | `repositories/guilds.py` |
 | Cấu hình model | `routers/model_config.py` | `services/model_config.py` | `repositories/model_config.py` |
@@ -72,3 +73,9 @@ Worker dùng lease có hạn, attempt budget và backoff cho job/action. Khi h�
 SQLite phù hợp triển khai một host với file trên local storage và số lượng ghi đồng thời nhỏ. Cần chọn database/queue phù hợp trước khi mở rộng nhiều host. Health phản ánh kết nối DB và heartbeat gần nhất, không chứng minh mọi job đang tiến triển.
 
 Chất lượng phân loại cần dữ liệu gán nhãn và đánh giá riêng; mock không đo chất lượng Meta. Các giới hạn kiểm chứng hiện tại được ghi trong [tài liệu kiểm thử](TESTING.md).
+
+## Tách trách nhiệm trong đợt reliability
+
+`services/messages.py` giữ ingestion và điều phối phân loại. `topic_memory.py` là reducer thuần cho facts; `services/topic_projection.py` chịu trách nhiệm summary/outbox. Manual review dùng hợp đồng `review_contracts.py`, port riêng `ports/reviews.py` và service riêng, không nhét endpoint/admin logic vào workflow AI.
+
+Các pattern đang dùng là Repository, Unit of Work, Transactional Outbox, provider adapter và optimistic concurrency. Thêm module vì có trách nhiệm nghiệp vụ cụ thể; chưa cần microservices hay một framework subagent mới. Các application/domain module vẫn không import SQLAlchemy hoặc FastAPI.
