@@ -1,4 +1,5 @@
 from functools import lru_cache
+from typing import Literal
 
 from pydantic import AliasChoices, Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -44,7 +45,14 @@ class Settings(BaseSettings):
         default=False, validation_alias=AliasChoices("COCONERD_MOCK_LLM", "MOCK_LLM")
     )
     llm_temperature: float = 0.0
-    llm_max_tokens: int = 2048
+    llm_max_tokens: int = Field(
+        default=2048,
+        validation_alias=AliasChoices("COCONERD_LLM_MAX_TOKENS", "LLM_MAX_TOKENS"),
+    )
+    llm_reasoning_effort: Literal["minimal", "low", "medium", "high", "xhigh", "max"] = Field(
+        default="low",
+        validation_alias=AliasChoices("COCONERD_LLM_REASONING_EFFORT", "LLM_REASONING_EFFORT"),
+    )
     worker_poll_seconds: float = Field(
         default=1.0,
         validation_alias=AliasChoices("COCONERD_WORKER_POLL_SECONDS", "WORKER_POLL_SECONDS"),

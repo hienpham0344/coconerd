@@ -3,6 +3,7 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
+from pydantic import ValidationError
 
 from backend.application.contracts import ClassificationResult, TopicCandidate, TopicDecision
 from backend.application.read_models import ContextMessage
@@ -13,6 +14,7 @@ from backend.infrastructure import meta_provider
 from backend.infrastructure.meta_provider import (
     _PROMPT_CACHE_KEY,
     MetaModelProvider,
+    MetaOutputTruncatedError,
     MockMetaProvider,
 )
 
@@ -62,6 +64,9 @@ def _decision_json() -> str:
             "open_questions": [],
             "action_items": [],
             "summary": "Planning the launch.",
+            "evidence_message_ids": ["message-1"],
+            "defer_reason": None,
+            "multiple_topics": False,
         }
     )
 
@@ -75,6 +80,7 @@ async def test_mock_provider_returns_result_with_unknown_usage():
     assert result.prompt_tokens is None
     assert result.completion_tokens is None
     assert result.cached_tokens is None
+    assert result.reasoning_tokens is None
     assert result.latency_ms >= 0
 
 
@@ -96,6 +102,7 @@ def test_classification_payload_keeps_unknown_usage_unknown():
         "prompt_tokens": None,
         "completion_tokens": None,
         "cached_tokens": None,
+        "reasoning_tokens": None,
         "latency_ms": 8,
     }
 
@@ -110,6 +117,7 @@ async def test_meta_provider_requests_strict_topic_decision_schema_and_usage(
             usage=SimpleNamespace(
                 prompt_tokens=29,
                 completion_tokens=12,
+                completion_tokens_details=SimpleNamespace(reasoning_tokens=5),
                 prompt_tokens_details=(
                     SimpleNamespace(cached_tokens=cached_tokens)
                     if cached_tokens is not None
@@ -159,8 +167,12 @@ async def test_meta_provider_requests_strict_topic_decision_schema_and_usage(
     assert result.prompt_tokens == 29
     assert result.completion_tokens == 12
     assert result.cached_tokens == cached_tokens
+    assert result.reasoning_tokens == 5
+    assert result.decision.evidence_message_ids == ["message-1"]
+    assert schema["properties"]["multiple_topics"] == {"type": "boolean"}
     assert result.latency_ms >= 0
     assert completions.request["prompt_cache_key"] == _PROMPT_CACHE_KEY
+    assert completions.request["reasoning_effort"] == "low"
     assert completions.request["messages"][0]["role"] == "system"
     assert completions.request["messages"][1]["role"] == "user"
     prompt_data = json.loads(completions.request["messages"][1]["content"])
@@ -175,3 +187,28 @@ async def test_meta_provider_requests_strict_topic_decision_schema_and_usage(
         }
     ]
     assert "may be unrelated" in completions.request["messages"][0]["content"]
+
+
+def test_reasoning_effort_rejects_unsupported_value():
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, llm_reasoning_effort="none")
+
+
+def test_empty_meta_key_is_rejected_before_an_api_call():
+    with pytest.raises(ValueError, match="MODEL_API_KEY"):
+        MetaModelProvider(Settings(_env_file=None, meta_api_key=""))
+
+
+async def test_meta_provider_reports_output_budget_exhaustion(monkeypatch):
+    completions = FakeCompletions(
+        SimpleNamespace(
+            choices=[SimpleNamespace(finish_reason="length", message=SimpleNamespace(content=""))],
+            usage=SimpleNamespace(completion_tokens=2048),
+        )
+    )
+    fake_client = SimpleNamespace(chat=SimpleNamespace(completions=completions), close=lambda: None)
+    monkeypatch.setattr(meta_provider, "AsyncOpenAI", lambda **_kwargs: fake_client)
+
+    provider = MetaModelProvider(_settings())
+    with pytest.raises(MetaOutputTruncatedError):
+        await provider.classify(_message(), [])

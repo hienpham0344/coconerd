@@ -168,12 +168,18 @@ async def test_processing_writes_new_topic_decision_summary_and_actions_atomical
         messages=SimpleNamespace(
             get=get_message,
             recent_before=_empty_recent,
+            evidence_for_topic=_empty_recent,
             reply_topic_id=none,
             add_association=association,
             add_decision=decision,
         ),
         topics=SimpleNamespace(
-            candidates=candidates, create=create, get=none, touch=touch, add_episode=episode
+            search=_empty_recent,
+            candidates=candidates,
+            create=create,
+            get=none,
+            touch=touch,
+            add_episode=episode,
         ),
         summaries=SimpleNamespace(latest=none, add=add_summary),
         actions=SimpleNamespace(add=add_action, pending_create=none),
@@ -258,10 +264,11 @@ async def test_processing_persists_nonempty_retrieved_candidate_ids(monkeypatch)
         messages=SimpleNamespace(
             get=get_message,
             recent_before=_empty_recent,
+            evidence_for_topic=_empty_recent,
             add_association=add_association,
             add_decision=add_decision,
         ),
-        topics=SimpleNamespace(candidates=candidates),
+        topics=SimpleNamespace(candidates=candidates, search=_empty_recent),
         summaries=SimpleNamespace(latest=none),
     )
     result = await process_message_record(uow, "record-1", FakeProvider())

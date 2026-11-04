@@ -1,10 +1,11 @@
 from datetime import datetime
 from uuid import uuid4
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.application.read_models import TopicReadModel
+from backend.application.topic_terms import search_terms
 from backend.domain.entities import ConversationTopic
 from backend.domain.enums import TopicStatus
 from backend.infrastructure.database.models import (
@@ -15,13 +16,38 @@ from backend.infrastructure.database.models import (
     MessageTopicAssociationRecord,
     ProcessingJobRecord,
     TopicRecord,
+    TopicSearchTermRecord,
     TopicSummaryRecord,
 )
+from backend.infrastructure.database.topic_index import index_topic
 
 
 class TopicRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
+
+    async def search(self, guild_id: str, query: str, limit: int = 30) -> list[TopicReadModel]:
+        terms = search_terms(query)
+        if not terms or limit <= 0:
+            return []
+        records = await self.session.scalars(
+            select(TopicRecord)
+            .join(TopicSearchTermRecord)
+            .where(
+                TopicRecord.guild_id == guild_id,
+                TopicSearchTermRecord.guild_id == guild_id,
+                TopicRecord.status.in_(["ACTIVE", "DORMANT", "RESUMED"]),
+                TopicSearchTermRecord.term.in_(terms),
+            )
+            .group_by(TopicRecord.id)
+            .order_by(
+                func.sum(TopicSearchTermRecord.weight).desc(),
+                TopicRecord.last_activity_at.desc(),
+                TopicRecord.id,
+            )
+            .limit(min(limit, 30))
+        )
+        return [_topic_read_model(record) for record in records]
 
     async def candidates_read_models(self, guild_id: str, limit: int = 30) -> list[TopicReadModel]:
         records = await self.candidates(guild_id, limit)
@@ -64,6 +90,9 @@ class TopicRepository:
             last_activity_at=topic.last_activity_at,
         )
         self.session.add(record)
+        # Child rows are staged later in the same transaction; persist the parent first.
+        await self.session.flush([record])
+        await index_topic(self.session, record, {})
         return record
 
     async def set_status(self, guild_id: str, topic_id: str, status: str) -> None:
@@ -91,6 +120,7 @@ class TopicRepository:
                 TopicRecord.guild_id == guild_id,
                 TopicRecord.id == topic_id,
                 TopicRecord.version == expected_version,
+                TopicRecord.status.in_(["ACTIVE", "DORMANT", "RESUMED"]),
             )
             .values(version=expected_version + 1, last_activity_at=activity_at)
             .execution_options(synchronize_session=False)
@@ -181,6 +211,12 @@ class TopicRepository:
         await self.session.execute(
             delete(EpisodeRecord).where(
                 EpisodeRecord.guild_id == guild_id, EpisodeRecord.topic_id == topic_id
+            )
+        )
+        await self.session.execute(
+            delete(TopicSearchTermRecord).where(
+                TopicSearchTermRecord.guild_id == guild_id,
+                TopicSearchTermRecord.topic_id == topic_id,
             )
         )
         await self.session.execute(

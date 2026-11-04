@@ -1,20 +1,34 @@
 """Bounded, deterministic local shortlist for topic classification."""
 
-import re
+from collections.abc import Sequence
+from dataclasses import replace
 
 from backend.application.contracts import TopicCandidate
+from backend.application.read_models import ContextMessage
+from backend.application.topic_terms import search_terms
 from backend.domain.entities import ConversationMessage
 
-_MAX_SOURCE_CANDIDATES = 30
+_MAX_SOURCE_CANDIDATES = 60
 _MAX_CANDIDATES = 5
 _FIELD_WEIGHTS = (("title", 3.0), ("description", 1.5))
 _SUMMARY_LISTS = ("proposals", "decisions", "open_questions", "action_items")
 _ELIGIBLE_STATUSES = {"ACTIVE", "DORMANT", "RESUMED"}
-_TOKEN_PATTERN = re.compile(r"[^\W_]+", re.UNICODE)
+
+
+def retrieval_message(
+    message: ConversationMessage, context: Sequence[ContextMessage]
+) -> ConversationMessage:
+    """Use an explicit clarification for ranking only; retain the original model target."""
+    clarification = " ".join(
+        item.content for item in context if item.relation == "followup_clarification"
+    )
+    return (
+        replace(message, content=f"{message.content} {clarification}") if clarification else message
+    )
 
 
 def _tokens(value: str) -> set[str]:
-    return set(_TOKEN_PATTERN.findall(value.casefold()))
+    return set(search_terms(value, limit=300))
 
 
 def _compact(candidate: TopicCandidate) -> TopicCandidate:
@@ -61,7 +75,7 @@ def retrieve_topic_candidates(
     candidates: list[TopicCandidate],
     limit: int = _MAX_CANDIDATES,
 ) -> list[TopicCandidate]:
-    """Rank up to 30 eligible guild candidates and return compact cards.
+    """Rank up to 60 indexed/recent guild candidates and return compact cards.
 
     The caller supplies the guild-scoped repository results. Candidate input order is
     recent-first, so it also provides a deterministic fallback for weak lexical matches.

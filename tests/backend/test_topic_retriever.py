@@ -69,7 +69,7 @@ def test_retriever_uses_recent_fallback_for_zero_overlap():
 
 
 def test_retriever_handles_unicode_and_candidate_limit():
-    candidates = [_candidate(str(index), f"Candidate {index}") for index in range(30)]
+    candidates = [_candidate(str(index), f"Candidate {index}") for index in range(60)]
     candidates[0] = _candidate("viet", "Thảo luận tiếng Việt")
     candidates[2] = _candidate("closed", "Thảo luận tiếng Việt", status="CLOSED")
     candidates.append(_candidate("outside-bound", "Thảo luận tiếng Việt"))

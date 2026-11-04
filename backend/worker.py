@@ -6,6 +6,7 @@ from contextlib import suppress
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
+from backend.application.budgeted_provider import BudgetedProvider, ModelCallBudgetExceeded
 from backend.application.services.health import record_heartbeat
 from backend.application.services.jobs import claim_job, complete_job, fail_job
 from backend.application.services.messages import process_message_record
@@ -15,7 +16,11 @@ from backend.application.services.topics import mark_dormant_topics
 from backend.config import Settings, get_settings
 from backend.infrastructure.database.connection import create_session_factory
 from backend.infrastructure.database.unit_of_work import SqlAlchemyUnitOfWork
-from backend.infrastructure.meta_provider import MetaModelProvider, MockMetaProvider
+from backend.infrastructure.meta_provider import (
+    MetaModelProvider,
+    MetaOutputTruncatedError,
+    MockMetaProvider,
+)
 from backend.logging_config import configure_logging
 
 logger = logging.getLogger(__name__)
@@ -60,11 +65,19 @@ class ConversationWorker:
 
         provider = None
         try:
-            provider = await self._provider_for_guild(guild_id)
+            provider = BudgetedProvider(
+                lambda: self._provider_for_guild(guild_id),
+                lambda: self._reserve_model_call(job_id),
+            )
             async with self.session_factory() as session:
                 unit_of_work = SqlAlchemyUnitOfWork(session)
-                await process_message_record(unit_of_work, message_record_id, provider)
-                await complete_job(unit_of_work, job_id)
+                result = await process_message_record(
+                    unit_of_work,
+                    message_record_id,
+                    provider,
+                    followup_message_id=job.followup_message_id,
+                )
+                await complete_job(unit_of_work, job_id, result)
             await self._heartbeat("idle")
         except Exception as exc:
             logger.exception(
@@ -75,15 +88,26 @@ class ConversationWorker:
                     "error_type": type(exc).__name__,
                 },
             )
-            await self._fail_job(job_id, type(exc).__name__)
+            await self._fail_job(
+                job_id,
+                type(exc).__name__,
+                retryable=not isinstance(exc, (MetaOutputTruncatedError, ModelCallBudgetExceeded)),
+            )
         finally:
-            if provider is not None and isinstance(provider, MetaModelProvider):
+            if provider is not None:
                 await provider.close()
         return True
 
-    async def _fail_job(self, job_id: str, error_type: str) -> None:
+    async def _fail_job(self, job_id: str, error_type: str, *, retryable: bool = True) -> None:
         async with self.session_factory() as session:
-            await fail_job(SqlAlchemyUnitOfWork(session), job_id, error_type)
+            await fail_job(SqlAlchemyUnitOfWork(session), job_id, error_type, retryable=retryable)
+
+    async def _reserve_model_call(self, job_id: str) -> bool:
+        async with self.session_factory() as session:
+            uow = SqlAlchemyUnitOfWork(session)
+            reserved = await uow.jobs.reserve_model_call(job_id, self.worker_id)
+            await uow.commit()
+            return reserved
 
     async def prune_retained_data(self) -> int:
         async with self.session_factory() as session:
