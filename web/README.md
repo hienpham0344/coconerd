@@ -1,5 +1,7 @@
 # Coconerd web
 
+**Website:** [coconerd-2bn1.vercel.app](https://coconerd-2bn1.vercel.app/)
+
 Website công khai cho bot Coconerd, **không cần đăng nhập**. Phong cách khu vườn đêm lấy cảm hứng từ tài liệu Fernhollow; cách chia mục tham khảo Jockie Music, không sao chép giao diện hay nội dung bot nhạc.
 
 ## Chạy trên máy
@@ -48,7 +50,7 @@ npm run build
 npm start
 ```
 
-Mặc định chỉ lắng nghe `127.0.0.1:5173`. Chưa triển khai ra internet.
+Máy chủ cục bộ mặc định chỉ lắng nghe `127.0.0.1:5173`. Website công khai đã có bản triển khai trên Vercel ở liên kết đầu trang.
 
 ## Kiểm tra
 
