@@ -66,6 +66,8 @@ Mock chỉ chạy trong môi trường `development` hoặc `test`. Nó giúp ki
 
 - **Ingest bền vững:** lưu message và job trong cùng transaction; delivery trùng không tạo bản ghi hoặc job mới.
 - **Phân nhóm theo topic:** dùng model để chọn topic hiện có, tạo topic mới, defer trường hợp chưa chắc chắn hoặc bỏ qua nội dung không liên quan.
+- **Tìm lại topic cũ:** chỉ mục từ khóa trong SQLite, chuẩn hóa dấu và alias; không giới hạn tìm kiếm ở 30 topic gần nhất.
+- **Chờ ngữ cảnh:** tin thiếu ngữ cảnh được xét lại tối đa một lần khi có lời giải thích phù hợp; giới hạn hai lượt gọi model cho mỗi message, kể cả lượt lỗi.
 - **Memory và summary:** lưu association, episode và các phiên bản summary theo topic.
 - **Outbox cho Discord:** ghi action cùng transaction với cập nhật topic; bot claim, thực thi và ACK action qua API.
 - **Vận hành an toàn hơn:** API key riêng cho bot/admin, allowlist guild/channel, rate limit, giới hạn request, retry có giới hạn và retention dữ liệu.
@@ -168,17 +170,21 @@ Request/response, headers, rate limit và mã lỗi được mô tả trong [API
 
 ```bash
 pytest
-ruff check backend tests scripts
-ruff format --check backend tests scripts
+ruff check backend tests scripts alembic
+ruff format --check backend tests scripts alembic
 ```
 
 Suite dùng SQLite cục bộ và provider mock, không gọi Meta API có tính phí. Fixture trong `tests/fixtures/evaluation/` là dữ liệu tổng hợp nhỏ, không đại diện benchmark. Cách chạy metric trên prediction xem [tài liệu kiểm thử](docs/TESTING.md).
 
 ## Phân loại topic
 
-Backend lấy tối đa 30 topic còn mở trong cùng guild, xếp hạng cục bộ và gửi tối đa 5 topic gọn cho Meta. Tin nhắn trả lời trực tiếp được ưu tiên; bộ lọc chỉ chọn ứng viên, không tự gắn topic. Meta trả quyết định theo JSON Schema nghiêm ngặt, sau đó backend vẫn kiểm tra guild và trạng thái topic.
+Backend hợp nhất tối đa 30 topic từ chỉ mục tìm kiếm với 30 topic gần đây trong cùng guild, xếp hạng cục bộ và gửi tối đa 5 topic gọn cho Meta. Topic cũ còn mở vẫn có thể được tìm thấy. Context giới hạn 6 tin/1.600 ký tự; reply và lời giải thích được ưu tiên, nhưng không tự động chứng minh cùng topic.
 
-Prompt có tiền tố ổn định để Meta có thể tự tái sử dụng cache. Token đầu vào, token cache (nếu API trả về), token đầu ra và độ trễ được lưu cùng quyết định; trường thiếu giữ giá trị chưa biết. Chưa có bộ hội thoại gán nhãn đại diện nên chưa thể kết luận độ chính xác hay mức tiết kiệm token.
+Policy `topic-policy-v3` yêu cầu evidence chứa ID tin gốc, chỉ dùng ID đã cung cấp và topic nằm trong shortlist. Input nhiều chủ đề được `defer`; title trùng không tự ép gộp. Backend kiểm tra lại trạng thái topic trước khi ghi association/summary/action. Kiểm tra ID không chứng minh model hiểu đúng nghĩa; confidence chưa được hiệu chỉnh thành xác suất đúng.
+
+Tin rỗng thành `irrelevant`; câu xác nhận như `ok` không có điểm tham chiếu thành `defer`, đều không gọi Meta. Tin `defer` vì thiếu ngữ cảnh hoặc mơ hồ có thể chờ lời giải thích cùng channel trong 10 phút và xét lại một lần. Association đã gán topic không tự đổi. Mỗi message được đặt chỗ tối đa hai lượt gọi model qua mọi lần retry; lỗi hoặc crash sau đặt chỗ vẫn có thể tiêu hao hạn mức.
+
+Mặc định dùng `COCONERD_LLM_REASONING_EFFORT=low` và `COCONERD_LLM_MAX_TOKENS=2048`. Prompt có tiền tố/cache key theo phiên bản; token thiếu thông tin giữ giá trị chưa biết. Tools là các hàm đọc dữ liệu do code điều phối, chưa thêm model subagent hoặc vector DB. Bộ đánh giá có dev/holdout tổng hợp, chế độ mock và live có giới hạn lượt gọi; xem [cách chạy và giới hạn kết luận](docs/TESTING.md).
 
 ## Tài liệu
 
