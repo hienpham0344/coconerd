@@ -1,0 +1,60 @@
+{
+  "mode": "live",
+  "synthetic": true,
+  "model_accuracy_claim": false,
+  "cases": 10,
+  "completed": 5,
+  "errors": 0,
+  "skipped": 5,
+  "prediction_coverage": 0.5,
+  "outcome_accuracy": 0.5,
+  "decision_accuracy": 0.5,
+  "candidate_recall_at_5": 1.0,
+  "existing_labels": 5,
+  "retrieved_gold_topics": 5,
+  "wrong_merges": 0,
+  "wrong_merge_rate": 0.0,
+  "duplicate_new": 0,
+  "defer_precision": 1.0,
+  "assignment_coverage": 0.3,
+  "assignment_precision": 1.0,
+  "reserved_model_calls": 3,
+  "usage": {
+    "prompt_tokens": {
+      "known_sum": 2976,
+      "known_cases": 5,
+      "total": null
+    },
+    "completion_tokens": {
+      "known_sum": 3492,
+      "known_cases": 5,
+      "total": null
+    },
+    "cached_tokens": {
+      "known_sum": 1506,
+      "known_cases": 5,
+      "total": null
+    },
+    "reasoning_tokens": {
+      "known_sum": 2785,
+      "known_cases": 5,
+      "total": null
+    },
+    "total_tokens": null
+  },
+  "latency_ms": {
+    "known_cases": 10,
+    "all_cases_mean": 3934.2,
+    "model_attempts_known": 3,
+    "model_attempts_mean": 13070.333333333334
+  },
+  "fixture_sha256": "8d826e18345ee90fa6e28b2007519208eb46f2329bf404058bfefb25eab0864e",
+  "policy_versions": [
+    "topic-policy-v3"
+  ],
+  "models": [
+    "local-defer",
+    "local-empty",
+    "muse-spark-1.3"
+  ]
+}

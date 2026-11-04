@@ -1,0 +1,60 @@
+{
+  "mode": "mock",
+  "synthetic": true,
+  "model_accuracy_claim": false,
+  "cases": 10,
+  "completed": 10,
+  "errors": 0,
+  "skipped": 0,
+  "prediction_coverage": 1.0,
+  "outcome_accuracy": 0.4,
+  "decision_accuracy": 0.4,
+  "candidate_recall_at_5": 1.0,
+  "existing_labels": 5,
+  "retrieved_gold_topics": 5,
+  "wrong_merges": 1,
+  "wrong_merge_rate": 1.0,
+  "duplicate_new": 0,
+  "defer_precision": 0.2857142857142857,
+  "assignment_coverage": 0.2,
+  "assignment_precision": 0.5,
+  "reserved_model_calls": 0,
+  "usage": {
+    "prompt_tokens": {
+      "known_sum": 0,
+      "known_cases": 2,
+      "total": null
+    },
+    "completion_tokens": {
+      "known_sum": 0,
+      "known_cases": 2,
+      "total": null
+    },
+    "cached_tokens": {
+      "known_sum": 0,
+      "known_cases": 2,
+      "total": null
+    },
+    "reasoning_tokens": {
+      "known_sum": 0,
+      "known_cases": 2,
+      "total": null
+    },
+    "total_tokens": null
+  },
+  "latency_ms": {
+    "known_cases": 10,
+    "all_cases_mean": 23.5,
+    "model_attempts_known": 0,
+    "model_attempts_mean": null
+  },
+  "fixture_sha256": "1b5731781d20be77116af07878d13e24f91308c6ba843aa53890e011b39ced7e",
+  "policy_versions": [
+    "topic-policy-v3"
+  ],
+  "models": [
+    "local-defer",
+    "local-empty",
+    "mock-local"
+  ]
+}
