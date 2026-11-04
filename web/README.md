@@ -1,68 +1,68 @@
-# Coconerd web
+# Coconerd Web
 
-Website công khai cho bot Coconerd, **không cần đăng nhập**. Phong cách khu vườn đêm lấy cảm hứng từ tài liệu Fernhollow; cách chia mục tham khảo Jockie Music, không sao chép giao diện hay nội dung bot nhạc.
+Public website for the Coconerd bot, **no login required**. Night garden aesthetic inspired by Fernhollow documentation; section layout referenced from Jockie Music, without copying music bot visuals or content.
 
-## Chạy trên máy
+## Running Locally
 
-Cần Node.js 22.12+:
+Requires Node.js 22.12+:
 
 ```bash
-cd web # từ thư mục gốc repo coconerd
+cd web # from the coconerd repo root
 npm ci
 npm run dev
 ```
 
-Mở http://127.0.0.1:5173/. Không mở `index.html` qua `file://`; ứng dụng cần máy chủ để tải các thành phần. Không cần `.env`, API key hoặc database để xem website và dùng thử.
+Open http://127.0.0.1:5173/. Do not open `index.html` via `file://`; the application requires a server to load components. No `.env`, API key, or database is needed to view the website and explore the demo.
 
-## Các trang
+## Pages
 
-- Trang chủ: cảnh hoa Three.js tự dựng, tương tác con trỏ, chuyển động có thể dừng, âm thanh tùy chọn và nội dung giới thiệu.
-- Tính năng: ba phần minh họa về kết nối hội thoại, tóm tắt và phạm vi xử lý, kèm liên kết đến ví dụ trong bản trải nghiệm.
-- Hướng dẫn: ba bước bắt đầu, FAQ tìm kiếm tiếng Việt có/không dấu, kênh hỗ trợ và trạng thái dịch vụ gộp trong một trang.
-- Thêm vào Discord: mở hộp thoại trên trang hiện tại, dùng link chính thức khi có; khi chưa có link, cho phép mở bản trải nghiệm. Escape đóng hộp thoại và trả lại vị trí cuộn.
-- Trải nghiệm: chọn không gian mẫu, tìm/lọc chủ đề, đọc tóm tắt và hội thoại, thử khép lại chủ đề, đặt lại dữ liệu mẫu.
-- Dữ liệu & riêng tư: giải thích phạm vi nhận tin, AI, lưu trữ và bản trải nghiệm.
+- Home: Custom Three.js floral scene, pointer interaction, pausable animation, optional ambience audio, and introductory content.
+- Features: Three illustrated sections covering conversation linking, summarization, and processing boundaries, with direct links to demo examples.
+- Guide: Three setup steps, searchable FAQ with accent-insensitive search, support channels, and service status combined on a single page.
+- Add to Discord: Opens a dialog on the current page, using official links when available; allows opening the interactive demo when links are not yet configured. Escape closes the dialog and restores scroll position.
+- Demo: Select sample workspaces, search and filter topics, read summaries and discussions, test closing topics, and reset sample data.
+- Data & Privacy: Explains message scope, AI processing, storage policy, and demo sandbox boundaries.
 
-Mọi thay đổi trong bản trải nghiệm chỉ lưu cục bộ trong trình duyệt. Website không đọc hội thoại riêng, không quản trị server thật và không có endpoint đăng nhập. Các đường dẫn cũ `/app`, `/docs`, `/connect` vẫn hoạt động; `/faq`, `/support`, `/status` cùng mở trang Hướng dẫn. Thanh điều hướng chỉ giữ Tính năng, Hướng dẫn, Trải nghiệm và nút thêm bot; Dữ liệu & riêng tư nằm ở footer.
+All changes in the interactive demo are saved locally in the browser only. The website never reads private conversations, does not manage real servers, and has no login endpoints. Legacy paths `/app`, `/docs`, and `/connect` remain functional; `/faq`, `/support`, and `/status` all route to the Guide page. The navigation bar contains Features, Guide, Demo, and the Add Bot action; Data & Privacy is located in the footer.
 
-Ảnh bot nằm trên tiêu đề trang chủ; bảng màu kem ấm, than tối và olive đồng bộ với mascot. Cánh đồng hoa tiến chậm về phía người xem theo vòng lặp liên tục. Nút tạm dừng giữ nguyên cảnh; các khối nội dung xuất hiện khi cuộn, còn hiệu ứng chuyển trang bắt đầu sau khi nội dung được tải. Website tôn trọng tùy chọn giảm chuyển động của hệ điều hành.
+The bot mascot sits above the home page headline; warm ivory, charcoal, and muted olive color palette matches the mascot design. The flower field slowly advances toward the viewer in a continuous loop. The pause button freezes the scene; content sections reveal on scroll, and page transitions start after content is loaded. The website respects the operating system's reduced-motion preference.
 
-## Link chính thức và trạng thái
+## Official Links and Status
 
-Khi có link, sao chép `.env.example` thành `.env` rồi điền:
+When links are ready, copy `.env.example` to `.env` and fill in:
 
 ```dotenv
-DISCORD_INVITE_URL=https://discord.com/oauth2/authorize?client_id=<ID_THAT>&scope=bot
-DISCORD_SUPPORT_URL=https://discord.gg/<MA_MOI_THAT>
+DISCORD_INVITE_URL=https://discord.com/oauth2/authorize?client_id=<REAL_ID>&scope=bot
+DISCORD_SUPPORT_URL=https://discord.gg/<REAL_INVITE_CODE>
 COCONERD_STATUS_URL=http://127.0.0.1:8000/api/v1/health
 ```
 
-Đây chỉ là mẫu cú pháp, không phải lời mời thật. Hãy dán **toàn bộ link mời chính thức** của bot, gồm quyền cần thiết từ cấu hình Discord; website không tự đặt quyền quản trị. Có thể để trống cả ba biến. Khởi động lại web sau khi thay đổi.
+These are syntax templates, not actual invitations. Paste the **complete official invite link** of the bot, including necessary permissions configured in the Discord developer portal; the website does not grant administrative privileges on its own. All three variables can be left empty. Restart the web server after changes.
 
-`GET /api/site` chỉ trả hai link Discord đã kiểm tra. `GET /api/status` đọc endpoint health công khai nếu được cấu hình, chỉ trả trạng thái đã chuẩn hóa và thời gian kiểm tra. Kết quả lưu tối đa 30 giây, chờ tối đa 5 giây. Không gửi API key, cookie hay dữ liệu hội thoại tới endpoint đó. Các API đăng nhập và proxy quản trị cũ trả 404.
+`GET /api/site` returns only validated Discord links. `GET /api/status` queries the public health endpoint if configured, returning normalized status and check timestamp. Results are cached for up to 30 seconds with a 5-second timeout. No API keys, cookies, or conversation data are sent to that endpoint. Legacy login APIs and admin proxies return 404.
 
-## Bản production cục bộ
+## Local Production Build
 
 ```bash
 npm run build
 npm start
 ```
 
-Mặc định chỉ lắng nghe `127.0.0.1:5173`. Chưa triển khai ra internet.
+By default, listens only on `127.0.0.1:5173`. Not deployed to the public internet.
 
-## Kiểm tra
+## Testing
 
 ```bash
 npm test
 npm run build
 ```
 
-Suite kiểm tra cả routing của đường dẫn cũ/hộp thoại lời mời và HTTP: link công khai, URL không an toàn, việc loại bỏ đăng nhập/proxy quản trị, trạng thái chưa cấu hình, phản hồi lỗi và cache. Test routing TypeScript dùng cơ chế strip types tích hợp của Node.js. Bằng chứng kiểm tra giao diện nằm trong [docs/verification.md](docs/verification.md); ảnh xem trước nằm trong `docs/previews/`.
+The test suite covers legacy route resolution, invitation dialog behavior, and HTTP endpoints: public links, unsafe URL rejection, elimination of login/admin proxies, unconfigured states, error responses, and caching. TypeScript routing tests use Node.js built-in type stripping. Visual verification notes are documented in [docs/verification.md](docs/verification.md); preview screenshots are in `docs/previews/`.
 
-## Phạm vi nguồn
+## Source Scope
 
-Website nằm trong `web/`, cùng repo với `../backend/` và `../bot/`. Các lệnh npm chạy trong `web/`; API, worker Python và cấu hình `pyproject.toml` vẫn chạy từ thư mục gốc repo. Website không tự tạo danh sách slash command chưa được xác minh.
+The website is located in `web/`, alongside `../backend/` and `../bot/` in the same repository. Run npm commands in `web/`; Python API, worker, and `pyproject.toml` remain run from the repository root. The website does not generate unverified slash command lists.
 
-`bridge/`, các script Python và `tests/test_bridge.py` từ hướng triển khai trước được giữ để tham khảo tích hợp nội bộ. Chúng **không được dùng bởi website công khai**, không tự chạy và không cần thiết để mở website. Có thể kiểm tra riêng bằng `npm run test:bridge` sau khi cài dependency Python của backend từ thư mục gốc repo. Script tự tìm `../.venv/bin/python` và backend ở thư mục cha của `web/`, độc lập với thư mục terminal hiện tại; có thể ghi đè bằng `COCONERD_PYTHON` và `COCONERD_BACKEND_SOURCE`. Test dùng database cô lập trong `.cache/pytest`.
+`bridge/`, Python scripts, and `tests/test_bridge.py` from earlier deployment experiments are retained for internal integration reference. They are **not used by the public website**, do not run automatically, and are not required to run the site. They can be tested independently with `npm run test:bridge` after installing backend Python dependencies from the repository root. The test runner locates `../.venv/bin/python` and backend source in the parent directory of `web/`, independent of the current terminal directory; these can be overridden with `COCONERD_PYTHON` and `COCONERD_BACKEND_SOURCE`. Tests use an isolated database in `.cache/pytest`.
 
-Cảnh hoa và biểu tượng được dựng nguyên bản. Mascot tại `public/assets/coconerd-bot.png` là ảnh PNG trong suốt do người dùng cung cấp, được giữ nguyên và dùng trên trang chủ cùng bản trải nghiệm. Antonio dành cho tiêu đề tiếng Anh ở trang chủ; các trang phụ và tiêu đề tiếng Việt dùng Manrope. Font được tải từ Google Fonts, có font dự phòng. Website không có analytics hoặc quảng cáo.
+The floral scene and icons are custom-built. The mascot at `public/assets/coconerd-bot.png` is a transparent PNG provided by the user, preserved and displayed on the home page and in the demo. Antonio is used for home page English headings; subpages and body text use Manrope. Fonts are loaded from Google Fonts with standard fallbacks. The website contains no analytics or advertisements.

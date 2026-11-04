@@ -16,5 +16,5 @@ export function Dialog({ title, onClose, children, wide = false }: { title: stri
       window.scrollTo(scroll);
     };
   }, []);
-  return <dialog ref={ref} className={`dialog ${wide ? 'dialog-wide' : ''}`} aria-label={title} onCancel={e => { e.preventDefault(); onClose(); }} onClick={e => { if (e.target === ref.current) onClose(); }}><div className="dialog-inner"><div className="dialog-top"><span className="eyebrow">{title}</span><button className="icon-button" onClick={onClose} aria-label="Đóng"><X size={20} /></button></div>{children}</div></dialog>;
+  return <dialog ref={ref} className={`dialog ${wide ? 'dialog-wide' : ''}`} aria-label={title} onCancel={e => { e.preventDefault(); onClose(); }} onClick={e => { if (e.target === ref.current) onClose(); }}><div className="dialog-inner"><div className="dialog-top"><span className="eyebrow">{title}</span><button className="icon-button" onClick={onClose} aria-label="Close"><X size={20} /></button></div>{children}</div></dialog>;
 }

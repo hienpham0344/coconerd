@@ -20,7 +20,7 @@ export function useAmbience() {
       await audio.current.context.resume();
       audio.current.gain.gain.setTargetAtTime(playing ? 0 : .2, audio.current.context.currentTime, .5);
       setPlaying(!playing); setError('');
-    } catch { setError('Trình duyệt chưa cho phép phát âm thanh.'); }
+    } catch { setError('Browser audio playback is not allowed.'); }
   };
   const muffle = (value: boolean) => { const a = audio.current; if (a) a.filter.frequency.setTargetAtTime(value ? 180 : 650, a.context.currentTime, .6); };
   useEffect(() => () => { void audio.current?.context.close(); audio.current = null; }, []);

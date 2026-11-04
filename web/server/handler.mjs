@@ -52,10 +52,10 @@ export function createHandler(config = {}, next) {
     res.setHeader('X-Frame-Options', 'DENY');
     let url;
     try { url = new URL(req.url, 'http://localhost'); }
-    catch { return json(res, 400, { detail: 'Đường dẫn không hợp lệ.' }); }
-    if (!url.pathname.startsWith('/api/')) return next ? next(req, res) : json(res, 404, { detail: 'Không tìm thấy trang.' });
-    if (!['/api/site', '/api/status'].includes(url.pathname)) return json(res, 404, { detail: 'Không tìm thấy chức năng.' });
-    if (!['GET', 'HEAD'].includes(req.method)) return json(res, 405, { detail: 'Chức năng này chỉ cho phép đọc.' });
+    catch { return json(res, 400, { detail: 'Invalid URL.' }); }
+    if (!url.pathname.startsWith('/api/')) return next ? next(req, res) : json(res, 404, { detail: 'Page not found.' });
+    if (!['/api/site', '/api/status'].includes(url.pathname)) return json(res, 404, { detail: 'Endpoint not found.' });
+    if (!['GET', 'HEAD'].includes(req.method)) return json(res, 405, { detail: 'Method not allowed. Read-only endpoint.' });
     return json(res, 200, url.pathname === '/api/site' ? links : await health(), req.method === 'HEAD');
   };
 }

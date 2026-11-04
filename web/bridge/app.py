@@ -35,7 +35,7 @@ def create_bridge(settings=None, session_factory=None):
     async def require_guild(session, guild_id):
         record = await session.get(GuildSettingsRecord, guild_id)
         if record is None:
-            raise HTTPException(404, "Server chưa được cấu hình.")
+            raise HTTPException(404, "Server has not been configured.")
         return record
 
     @app.get("/api/v1/admin/web/guilds", dependencies=auth)

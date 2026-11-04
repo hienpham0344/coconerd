@@ -3,7 +3,7 @@ import { ArrowUpRight, Menu, X } from 'lucide-react';
 import { Brand, Flower } from './Brand';
 
 const navigation = [
-  ['Tính năng', '/features'], ['Hướng dẫn', '/guide'], ['Trải nghiệm', '/demo'],
+  ['Features', '/features'], ['Guide', '/guide'], ['Demo', '/demo'],
 ];
 
 export function PublicHeader({ hero = false, active = '' }: { hero?: boolean; active?: string }) {
@@ -16,18 +16,18 @@ export function PublicHeader({ hero = false, active = '' }: { hero?: boolean; ac
   }, []);
   return <header className={`public-header ${hero ? 'public-header-hero' : ''}`}>
     <Brand />
-    <nav id="public-navigation" className={open ? 'public-nav is-open' : 'public-nav'} aria-label="Điều hướng chính">
+    <nav id="public-navigation" className={open ? 'public-nav is-open' : 'public-nav'} aria-label="Main navigation">
       {navigation.map(([label, href]) => <a key={href} href={`#${href}`} aria-current={active === href ? 'page' : undefined} onClick={() => setOpen(false)}>{label}</a>)}
-      <a className="pill" href="#/invite" onClick={() => setOpen(false)}>Thêm vào Discord <ArrowUpRight size={16} /></a>
+      <a className="pill" href="#/invite" onClick={() => setOpen(false)}>Add to Discord <ArrowUpRight size={16} /></a>
     </nav>
-    <button className="icon-button public-menu" aria-label={open ? 'Đóng menu' : 'Mở menu'} aria-expanded={open} aria-controls="public-navigation" onClick={() => setOpen(!open)}>{open ? <X /> : <Menu />}</button>
+    <button className="icon-button public-menu" aria-label={open ? 'Close menu' : 'Open menu'} aria-expanded={open} aria-controls="public-navigation" onClick={() => setOpen(!open)}>{open ? <X /> : <Menu />}</button>
   </header>;
 }
 
 export function PublicFooter() {
   return <footer className="public-footer section-shell">
     <div><Brand /><p>A little order. A lot more connection.</p></div>
-    <div className="footer-links"><a href="#/features">Tính năng</a><a href="#/guide">Hướng dẫn & FAQ</a><a href="#/demo">Trải nghiệm</a><a href="#/privacy">Dữ liệu & riêng tư</a></div>
+    <div className="footer-links"><a href="#/features">Features</a><a href="#/guide">Guide & FAQ</a><a href="#/demo">Demo</a><a href="#/privacy">Data & Privacy</a></div>
     <div className="footer-bottom"><span>© {new Date().getFullYear()} Coconerd</span><span><Flower size={15} /> Good things grow together.</span></div>
   </footer>;
 }

@@ -12,11 +12,11 @@ The public website below supersedes the earlier login/admin interface after the 
 
 ## Browser verification
 - Mobile: actual content width 375px, viewport height 844px. Navigation opened and routed to features; feature and invitation pages fitted the screen. Guide also rendered at mobile width.
-- Feature search `tom tat` returned one summary feature; combining it with the conversation category returned the designed empty state.
-- FAQ search `tai khoan` returned and expanded the relevant account-free answer.
-- Legacy `/connect` displayed the invitation availability page, with no password form. Missing invitation URL displayed “Sắp ra mắt” and a disabled external invitation action.
+- Feature search `summary` returned one summary feature; combining it with the conversation category returned the designed empty state.
+- FAQ search `account` returned and expanded the relevant account-free answer.
+- Legacy `/connect` displayed the invitation availability page, with no password form. Missing invitation URL displayed "Coming Soon" and a disabled external invitation action.
 - Desktop: actual content width 1265px, viewport height 720px. Full public navigation and feature layout rendered correctly.
-- Status page displayed “Chưa có trạng thái trực tiếp”, website reachable, and unknown storage/processing status when no health source was configured.
+- Status page displayed "No live status yet", website reachable, and unknown storage/processing status when no health source was configured.
 - A direct demo topic link opened the correct sample guild/topic without login. Summary and 4 conversation messages loaded; confirmation changed the topic to closed; resetting the demo restored the original resumed status.
 - Garden landing rendered with the new public navigation. No error/warn entries were returned from the final desktop QA tab.
 - Earlier in this same task: garden pause/audio toggle, landing example tabs and demo search were exercised. Mobile headline clipping was reproduced and fixed. Final image review found the contrast overlay below the appended canvas; it was moved above the canvas and rechecked.
@@ -36,7 +36,7 @@ Final continuation: preview restarted after the interrupted session, latest land
 
 - Resumed the existing follow-up implementation without replacing the mascot or rebuilding the website. The mascot sits above the landing headline and appears in the demo welcome. Lower sections use warm ivory, charcoal and muted olive.
 - Flower and stem shaders share forward travel at 0.6 scene units per active second and recycle in distant fog. Paused native browser screenshots were identical; movement can be enabled again through the existing control.
-- Observed staggered scroll reveals with intermediate opacity values on the landing. Feature cards also revealed after lazy loading; FAQ search `tai khoan` produced one expanded, revealed answer. Extended reveal targets to FAQ, status and privacy content.
+- Observed staggered scroll reveals with intermediate opacity values on the landing. Feature cards also revealed after lazy loading; FAQ search `account` produced one expanded, revealed answer. Extended reveal targets to FAQ, status and privacy content.
 - Moved the page-motion wrapper inside the route Suspense boundary so page arrival waits for lazy content. Kept the wrapper unkeyed to preserve demo state between its routes.
 - Actual desktop viewport 1280×720 and mobile viewport 375×844 reported no horizontal overflow. The mascot was above the headline, mobile navigation opened and routed, and the demo welcome rendered the supplied image.
 - `npm test`: 6/6 passed after allowing localhost listeners. The initial sandbox run could not listen on localhost (`EPERM`); no test or server code change was needed.
@@ -49,7 +49,7 @@ Final continuation: preview restarted after the interrupted session, latest land
 - Navigation now contains Features, Guide and Demo. Guide contains three setup steps, searchable FAQs, actual support availability and compact public health status. Features contains three illustrated explanations; invitation opens a modal. Privacy remains in the footer. Old FAQ/support/status paths resolve to Guide; no login or private backend routes were added.
 - Routing regression tests were written first, failed before the new resolver existed, then passed. Final `npm test`: **11/11 passed**, including five routing cases and the six existing HTTP boundary/configuration tests. `npm run build`: TypeScript/Vite passed after the final source changes.
 - Browser: Features rendered three illustrated sections at an actual 1280×720 desktop viewport and 375×844 mobile viewport without horizontal overflow. Guide was also checked at desktop/mobile sizes; its heading uses Manrope and its three steps and ten questions rendered.
-- FAQ query `tai khoan` returned the account-free answer, expanded and revealed at opacity 1. Mobile menu navigated from Features to Guide. Direct `/support` displayed the combined Guide and correct title. Missing health configuration displayed that bot status has not been published.
+- FAQ query `account` returned the account-free answer, expanded and revealed at opacity 1. Mobile menu navigated from Features to Guide. Direct `/support` displayed the combined Guide and correct title. Missing health configuration displayed that bot status has not been published.
 - Invitation modal displayed the real missing-link state. Escape closed it, removed the dialog and restored body scrolling. Reproduced and fixed focus restoration jumping to an earlier input by restoring focus without scrolling and preserving dialog scroll position; the final mobile check closed at the same scroll position as the open modal (304px). Browser click automation itself scrolled the opener into view before opening.
 - The sample `new-website` topic still opened its native dialog and rendered its summary after the shared Dialog change. No horizontal overflow was reported there.
 - Final images: `previews/features-refined-desktop.png`, `previews/features-refined-mobile.png`, `previews/guide-refined-desktop.png`. Reset the temporary viewport and retained the final Features tab. The first preview tab stopped attaching during QA; a new tab in the same browser completed the remaining checks.
