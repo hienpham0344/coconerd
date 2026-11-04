@@ -220,17 +220,18 @@ async def process_message_record(
     )
 
     if topic is not None:
-        topic.last_activity_at = message.created_at
-        expected_version = topic.version
-        version_result = await session.execute(
-            update(TopicRecord)
-            .where(TopicRecord.id == topic.id, TopicRecord.version == expected_version)
-            .values(version=expected_version + 1, last_activity_at=message.created_at)
-            .execution_options(synchronize_session=False)
-        )
-        if version_result.rowcount != 1:
-            raise RuntimeError("Topic changed concurrently; processing will be retried")
-        topic.version = expected_version + 1
+        if not new_topic:
+            topic.last_activity_at = message.created_at
+            expected_version = topic.version
+            version_result = await session.execute(
+                update(TopicRecord)
+                .where(TopicRecord.id == topic.id, TopicRecord.version == expected_version)
+                .values(version=expected_version + 1, last_activity_at=message.created_at)
+                .execution_options(synchronize_session=False)
+            )
+            if version_result.rowcount != 1:
+                raise RuntimeError("Topic changed concurrently; processing will be retried")
+            topic.version = expected_version + 1
         actions = ActionRepository(session)
         create_action_id: str | None = None
         if new_topic:
@@ -242,6 +243,7 @@ async def process_message_record(
                 payload={
                     "title": topic.title,
                     "source_message_id": message.message_id,
+                    "source_author_id": message.author_id,
                     "source_author_name": message.author_name,
                     "source_created_at": message.created_at.isoformat(),
                     "source_content": message.content,
@@ -256,6 +258,7 @@ async def process_message_record(
                 action_type=ActionType.APPEND_MESSAGE,
                 payload={
                     "source_message_id": message.message_id,
+                    "source_author_id": message.author_id,
                     "source_author_name": message.author_name,
                     "source_created_at": message.created_at.isoformat(),
                     "source_content": message.content,
@@ -282,6 +285,7 @@ async def process_message_record(
                     action_type=ActionType.APPEND_MESSAGE,
                     payload={
                         "source_message_id": message.message_id,
+                        "source_author_id": message.author_id,
                         "source_author_name": message.author_name,
                         "source_created_at": message.created_at.isoformat(),
                         "source_content": message.content,
@@ -297,6 +301,7 @@ async def process_message_record(
                     payload={
                         "title": topic.title,
                         "source_message_id": message.message_id,
+                        "source_author_id": message.author_id,
                         "source_author_name": message.author_name,
                         "source_created_at": message.created_at.isoformat(),
                         "source_content": message.content,

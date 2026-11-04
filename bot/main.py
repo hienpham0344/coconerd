@@ -125,13 +125,23 @@ class BackendClient:
     """HTTP Client for communicating with the Coconerd Backend API."""
 
     def __init__(self, base_url: str, api_key: str, admin_api_key: str | None = None):
-        self.base_url = base_url
+        self.base_url = str(base_url).rstrip("/")
         self.api_key = api_key
         self.admin_api_key = admin_api_key or get_admin_api_key()
         self._session: aiohttp.ClientSession | None = None
         self._settings_cache: dict[str, tuple[float, dict[str, Any]]] = {}
         self._cache_ttl = 30.0  # seconds
         self.last_error: str | None = None
+
+    def _normalize_snowflake(self, snowflake_id: Any) -> str:
+        """Normalizes a Discord snowflake/identifier string safely stripping whitespace and slashes."""
+        return str(snowflake_id).strip().strip("/")
+
+    def _build_url(self, path: str) -> str:
+        """Safely joins base_url with path, ensuring single leading slash on path and no duplicate slashes."""
+        clean_base = str(self.base_url).rstrip("/")
+        clean_path = path.lstrip("/")
+        return f"{clean_base}/{clean_path}"
 
     async def get_session(self) -> aiohttp.ClientSession:
         if self._session is None or self._session.closed:
@@ -147,8 +157,7 @@ class BackendClient:
             await self._session.close()
 
     async def get_guild_settings(self, guild_id: str, force_refresh: bool = False) -> dict[str, Any]:
-        clean_guild_id = str(guild_id).strip().strip("/")
-        clean_base_url = str(self.base_url).rstrip("/")
+        clean_guild_id = self._normalize_snowflake(guild_id)
         now = time.monotonic()
         if not force_refresh and clean_guild_id in self._settings_cache:
             ts, data = self._settings_cache[clean_guild_id]
@@ -156,7 +165,7 @@ class BackendClient:
                 return data
 
         session = await self.get_session()
-        url = f"{clean_base_url}/api/v1/guilds/{clean_guild_id}/settings"
+        url = self._build_url(f"api/v1/guilds/{clean_guild_id}/settings")
         try:
             async with session.get(url) as resp:
                 if resp.status == 200:
@@ -194,8 +203,7 @@ class BackendClient:
         retention_days: int = 365,
     ) -> dict[str, Any] | None:
         self.last_error = None
-        clean_guild_id = str(guild_id).strip().strip("/")
-        clean_base_url = str(self.base_url).rstrip("/")
+        clean_guild_id = self._normalize_snowflake(guild_id)
         session = await self.get_session()
         payload = {
             "enabled": enabled,
@@ -212,7 +220,7 @@ class BackendClient:
         if admin_key:
             endpoints.append(
                 (
-                    f"{clean_base_url}/api/v1/admin/guilds/{clean_guild_id}/settings",
+                    self._build_url(f"api/v1/admin/guilds/{clean_guild_id}/settings"),
                     {"X-Admin-API-Key": admin_key, "Content-Type": "application/json"},
                     "Admin API",
                 )
@@ -222,7 +230,7 @@ class BackendClient:
 
         endpoints.append(
             (
-                f"{clean_base_url}/api/v1/guilds/{clean_guild_id}/settings",
+                self._build_url(f"api/v1/guilds/{clean_guild_id}/settings"),
                 {"X-API-Key": self.api_key, "Content-Type": "application/json"},
                 "Bot API",
             )
@@ -299,7 +307,7 @@ class BackendClient:
         }
 
         session = await self.get_session()
-        url = f"{self.base_url}/api/v1/messages"
+        url = self._build_url("api/v1/messages")
         try:
             async with session.post(url, json=payload) as resp:
                 if resp.status in (200, 202):
@@ -316,7 +324,7 @@ class BackendClient:
 
     async def claim_actions(self, worker_id: str, limit: int = 10) -> list[dict[str, Any]]:
         session = await self.get_session()
-        url = f"{self.base_url}/api/v1/actions/claim"
+        url = self._build_url("api/v1/actions/claim")
         try:
             async with session.post(url, json={"worker_id": worker_id, "limit": limit}) as resp:
                 if resp.status == 200:
@@ -333,7 +341,8 @@ class BackendClient:
         discord_message_id: str | None = None,
     ) -> bool:
         session = await self.get_session()
-        url = f"{self.base_url}/api/v1/actions/{action_id}/complete"
+        clean_action_id = str(action_id).strip().strip("/")
+        url = self._build_url(f"api/v1/actions/{clean_action_id}/complete")
         payload = {
             "worker_id": worker_id,
             "discord_thread_id": discord_thread_id,
@@ -355,7 +364,8 @@ class BackendClient:
         retryable: bool = True,
     ) -> bool:
         session = await self.get_session()
-        url = f"{self.base_url}/api/v1/actions/{action_id}/fail"
+        clean_action_id = str(action_id).strip().strip("/")
+        url = self._build_url(f"api/v1/actions/{clean_action_id}/fail")
         payload = {
             "worker_id": worker_id,
             "error_type": error_type,
@@ -375,11 +385,12 @@ class BackendClient:
         include_closed: bool = False,
         limit: int = 50,
     ) -> list[dict[str, Any]]:
+        clean_guild_id = self._normalize_snowflake(guild_id)
         session = await self.get_session()
-        url = f"{self.base_url}/api/v1/topics"
-        params: dict[str, Any] = {"guild_id": guild_id, "limit": limit}
+        url = self._build_url("api/v1/topics")
+        params: dict[str, Any] = {"guild_id": clean_guild_id, "limit": limit}
         if channel_id:
-            params["channel_id"] = channel_id
+            params["channel_id"] = self._normalize_snowflake(channel_id)
         if include_closed:
             params["include_closed"] = "true"
         try:
@@ -394,11 +405,13 @@ class BackendClient:
     async def get_topic_summary(
         self, guild_id: str, topic_id: str, channel_id: str | None = None
     ) -> dict[str, Any] | None:
+        clean_guild_id = self._normalize_snowflake(guild_id)
+        clean_topic_id = str(topic_id).strip().strip("/")
         session = await self.get_session()
-        url = f"{self.base_url}/api/v1/topics/{topic_id}/summary"
-        params: dict[str, Any] = {"guild_id": guild_id}
+        url = self._build_url(f"api/v1/topics/{clean_topic_id}/summary")
+        params: dict[str, Any] = {"guild_id": clean_guild_id}
         if channel_id:
-            params["channel_id"] = channel_id
+            params["channel_id"] = self._normalize_snowflake(channel_id)
         try:
             async with session.get(url, params=params) as resp:
                 if resp.status == 200:
@@ -406,6 +419,62 @@ class BackendClient:
         except Exception:
             pass
         return None
+
+    async def get_topic(self, guild_id: str, topic_id: str) -> dict[str, Any] | None:
+        clean_guild_id = self._normalize_snowflake(guild_id)
+        clean_topic_id = str(topic_id).strip().strip("/")
+        session = await self.get_session()
+        url = self._build_url(f"api/v1/topics/{clean_topic_id}")
+        params = {"guild_id": clean_guild_id}
+        try:
+            async with session.get(url, params=params) as resp:
+                if resp.status == 200:
+                    return await resp.json()
+        except Exception:
+            pass
+        return None
+
+    async def set_topic_thread(
+        self, topic_id: str, guild_id: str, channel_id: str, discord_thread_id: str
+    ) -> bool:
+        clean_topic_id = str(topic_id).strip().strip("/")
+        session = await self.get_session()
+        url = self._build_url(f"api/v1/topics/{clean_topic_id}/thread")
+        payload = {
+            "guild_id": self._normalize_snowflake(guild_id),
+            "channel_id": self._normalize_snowflake(channel_id),
+            "discord_thread_id": str(discord_thread_id).strip(),
+        }
+        try:
+            async with session.put(url, json=payload) as resp:
+                if resp.status in (200, 201):
+                    return True
+                else:
+                    err_txt = await resp.text()
+                    print(
+                        f"⚠️ [MAPPING] Backend rejected thread mapping (status {resp.status}): {err_txt[:100]}"
+                    )
+                    return False
+        except Exception as exc:
+            print(f"⚠️ [MAPPING] Network error saving thread mapping: {exc}")
+            return False
+
+    async def get_topic_messages(
+        self, guild_id: str, topic_id: str, limit: int = 50
+    ) -> list[dict[str, Any]]:
+        clean_guild_id = self._normalize_snowflake(guild_id)
+        clean_topic_id = str(topic_id).strip().strip("/")
+        session = await self.get_session()
+        url = self._build_url(f"api/v1/topics/{clean_topic_id}/messages")
+        params = {"guild_id": clean_guild_id, "limit": limit}
+        try:
+            async with session.get(url, params=params) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    return data.get("items", [])
+        except Exception:
+            pass
+        return []
 
 
 class SetupConfigView(discord.ui.View):
@@ -919,6 +988,10 @@ def build_topic_summary_embed(
         color=0x22C55E if status_str == "ACTIVE" else 0x94A3B8,
     )
 
+    th_id = topic.get("discord_thread_id")
+    if th_id:
+        embed.add_field(name="🧵 Discussion Thread", value=f"<#{th_id}>", inline=False)
+
     overview = summary.get("overview")
     if overview:
         embed.add_field(name="📖 Summary Overview", value=overview[:1024], inline=False)
@@ -1201,7 +1274,444 @@ def create_bot() -> commands.Bot:
                     topic_id = action.get("topic_id")
 
                     try:
-                        # Fetch guild settings to find output channel
+                        # ---------------------------------------------------------
+                        # 1. Action Type: CREATE_THREAD (Standalone Thread under source channel)
+                        # ---------------------------------------------------------
+                        if action_type == "CREATE_THREAD":
+                            if not source_channel_id:
+                                await bot.backend.fail_action(
+                                    action_id,
+                                    bot.worker_id,
+                                    "MissingSourceChannel",
+                                    "CREATE_THREAD action is missing channel_id",
+                                    retryable=False,
+                                )
+                                continue
+
+                            if not topic_id:
+                                await bot.backend.fail_action(
+                                    action_id,
+                                    bot.worker_id,
+                                    "MissingTopicId",
+                                    "CREATE_THREAD action is missing topic_id",
+                                    retryable=False,
+                                )
+                                continue
+
+                            # Resolve source Input Channel
+                            source_channel = None
+                            try:
+                                source_channel = bot.get_channel(int(source_channel_id))
+                                if source_channel is None:
+                                    source_channel = await bot.fetch_channel(int(source_channel_id))
+                            except discord.NotFound:
+                                await bot.backend.fail_action(
+                                    action_id,
+                                    bot.worker_id,
+                                    "ChannelNotFound",
+                                    f"Source Input Channel {source_channel_id} was not found on Discord",
+                                    retryable=False,
+                                )
+                                continue
+                            except discord.Forbidden:
+                                await bot.backend.fail_action(
+                                    action_id,
+                                    bot.worker_id,
+                                    "ForbiddenChannelAccess",
+                                    f"Bot lacks permission to access source channel {source_channel_id}",
+                                    retryable=False,
+                                )
+                                continue
+                            except Exception as fetch_err:
+                                await bot.backend.fail_action(
+                                    action_id,
+                                    bot.worker_id,
+                                    "ChannelResolutionError",
+                                    f"Transient error resolving source channel {source_channel_id}: {fetch_err}",
+                                    retryable=True,
+                                )
+                                continue
+
+                            if not hasattr(source_channel, "guild") or str(source_channel.guild.id) != str(guild_id):
+                                await bot.backend.fail_action(
+                                    action_id,
+                                    bot.worker_id,
+                                    "GuildMismatch",
+                                    f"Source channel {source_channel_id} does not belong to expected guild {guild_id}",
+                                    retryable=False,
+                                )
+                                continue
+
+                            if not isinstance(source_channel, discord.TextChannel) and not hasattr(source_channel, "create_thread"):
+                                await bot.backend.fail_action(
+                                    action_id,
+                                    bot.worker_id,
+                                    "UnsupportedChannelType",
+                                    f"Channel {source_channel_id} ({type(source_channel).__name__}) does not support Thread creation",
+                                    retryable=False,
+                                )
+                                continue
+
+                            guild = source_channel.guild
+                            me = guild.me or guild.get_member(bot.user.id)
+                            if me:
+                                perms = source_channel.permissions_for(me)
+                                missing_perms = []
+                                if not perms.view_channel:
+                                    missing_perms.append("View Channel")
+                                if not perms.send_messages:
+                                    missing_perms.append("Send Messages")
+                                if not perms.create_public_threads:
+                                    missing_perms.append("Create Public Threads")
+                                if not perms.send_messages_in_threads:
+                                    missing_perms.append("Send Messages in Threads")
+
+                                if missing_perms:
+                                    await bot.backend.fail_action(
+                                        action_id,
+                                        bot.worker_id,
+                                        "MissingPermissions",
+                                        f"Bot lacks required permissions in #{source_channel.name}: {', '.join(missing_perms)}",
+                                        retryable=False,
+                                    )
+                                    continue
+
+                            title = payload.get("title", "Chủ đề thảo luận mới")
+                            source_author = payload.get("source_author_name", "Thành viên")
+                            source_content = payload.get("source_content", "")
+                            source_created_at = payload.get("source_created_at")
+
+                            sanitized_title = " ".join(title.split()).strip()
+                            thread_name = f"[Coconerd] {sanitized_title}"[:100]
+
+                            # Check existing persisted mapping in backend or action
+                            thread = None
+                            persisted_thread_id = action.get("discord_thread_id")
+                            if not persisted_thread_id:
+                                topic_info = await bot.backend.get_topic(guild_id, topic_id)
+                                if topic_info:
+                                    persisted_thread_id = topic_info.get("discord_thread_id")
+
+                            if persisted_thread_id:
+                                try:
+                                    thread = bot.get_channel(int(persisted_thread_id))
+                                    if thread is None:
+                                        thread = await bot.fetch_channel(int(persisted_thread_id))
+                                    print(f"🔄 [IDEMPOTENCY] Reusing already persisted thread {persisted_thread_id} for topic {topic_id}")
+                                except discord.NotFound:
+                                    print(f"⚠️ [THREAD] Persisted thread {persisted_thread_id} not found on Discord")
+                                    thread = None
+                                except Exception as th_err:
+                                    print(f"⚠️ [THREAD] Error fetching persisted thread {persisted_thread_id}: {th_err}")
+
+                            # If no persisted thread resolved, inspect active threads in channel to prevent duplicates
+                            if thread is None:
+                                try:
+                                    candidate_threads = list(source_channel.threads)
+                                    active_threads = await source_channel.active_threads()
+                                    for t in active_threads:
+                                        if t not in candidate_threads:
+                                            candidate_threads.append(t)
+
+                                    for t in candidate_threads:
+                                        if t.name == thread_name:
+                                            try:
+                                                async for m in t.history(limit=5, oldest_first=True):
+                                                    if (
+                                                        m.author.id == bot.user.id
+                                                        and "[TOPIC INITIALIZED]" in m.content
+                                                        and f"`{topic_id}`" in m.content
+                                                    ):
+                                                        thread = t
+                                                        print(f"🔄 [IDEMPOTENCY] Found existing active thread '{t.name}' (ID: {t.id}) matching topic {topic_id}")
+                                                        break
+                                            except Exception as t_err:
+                                                print(f"ℹ️ [THREAD] Error inspecting history of candidate thread {t.id}: {t_err}")
+                                            if thread:
+                                                break
+                                except Exception as search_err:
+                                    print(f"ℹ️ [THREAD] Error checking active threads: {search_err}")
+
+                            # Create standalone thread under source channel if not already existing
+                            if thread is None:
+                                try:
+                                    thread = await source_channel.create_thread(
+                                        name=thread_name,
+                                        auto_archive_duration=1440,
+                                        type=discord.ChannelType.public_thread,
+                                        reason=f"Coconerd Topic {topic_id}: {sanitized_title}",
+                                    )
+                                    print(f"🧵 [THREAD] Created standalone thread '{thread.name}' (ID: {thread.id}) under #{source_channel.name}")
+                                except discord.Forbidden:
+                                    await bot.backend.fail_action(
+                                        action_id,
+                                        bot.worker_id,
+                                        "ForbiddenCreateThread",
+                                        f"Bot is forbidden from creating thread in #{source_channel.name}",
+                                        retryable=False,
+                                    )
+                                    continue
+                                except Exception as create_err:
+                                    await bot.backend.fail_action(
+                                        action_id,
+                                        bot.worker_id,
+                                        "ThreadCreationFailed",
+                                        f"Failed to create thread in #{source_channel.name}: {create_err}",
+                                        retryable=True,
+                                    )
+                                    continue
+
+                            if getattr(thread, "archived", False):
+                                try:
+                                    await thread.edit(archived=False)
+                                except Exception:
+                                    pass
+
+                            # Seed the thread idempotently
+                            seed_message = None
+                            try:
+                                async for m in thread.history(limit=10, oldest_first=True):
+                                    if (
+                                        m.author.id == bot.user.id
+                                        and "[TOPIC INITIALIZED]" in m.content
+                                        and f"`{topic_id}`" in m.content
+                                    ):
+                                        seed_message = m
+                                        print(f"ℹ️ [SEED] Initial seed message already exists in thread {thread.id} for topic {topic_id}")
+                                        break
+                            except Exception as hist_err:
+                                print(f"⚠️ [SEED] Failed to inspect thread history for thread {thread.id}: {hist_err}")
+                                await bot.backend.fail_action(
+                                    action_id,
+                                    bot.worker_id,
+                                    "ThreadHistoryCheckFailed",
+                                    f"Failed to inspect history of thread {thread.id}: {hist_err}",
+                                    retryable=True,
+                                )
+                                continue
+
+                            if seed_message is None:
+                                ts_str = ""
+                                if source_created_at:
+                                    try:
+                                        dt = datetime.fromisoformat(str(source_created_at).replace("Z", "+00:00"))
+                                        ts_str = f"<t:{int(dt.timestamp())}:R>"
+                                    except Exception:
+                                        ts_str = str(source_created_at)
+
+                                display_content = source_content.strip()
+                                if len(display_content) > 1500:
+                                    display_content = display_content[:1500] + "... *(content truncated)*"
+
+                                time_part = f" ({ts_str})" if ts_str else ""
+                                quoted_content = "\n".join(f"> {line}" for line in display_content.splitlines()) if display_content else "> *(no text content)*"
+
+                                source_author_id = payload.get("source_author_id")
+                                source_message_id = payload.get("source_message_id")
+
+                                author_display = f"**{source_author}**"
+                                if source_author_id:
+                                    author_display += f" (<@{source_author_id}>)"
+
+                                jump_url = (
+                                    f"https://discord.com/channels/{guild_id}/{source_channel_id}/{source_message_id}"
+                                    if source_message_id
+                                    else ""
+                                )
+                                link_part = f"\n🔗 [Original Message]({jump_url}) · *(msg: {source_message_id})*" if jump_url else ""
+
+                                seed_text = (
+                                    f"🥥 **[TOPIC INITIALIZED]**\n"
+                                    f"📌 **Topic:** {sanitized_title}\n"
+                                    f"🆔 **Topic ID:** `{topic_id}`\n"
+                                    f"👤 **Started by:** {author_display} in <#{source_channel_id}>{time_part}\n\n"
+                                    f"💬 **Initial Message:**\n"
+                                    f"{quoted_content}"
+                                    f"{link_part}"
+                                )
+                                try:
+                                    seed_message = await thread.send(seed_text)
+                                    print(f"🌱 [SEED] Posted initial seed message in thread '{thread.name}' (Msg ID: {seed_message.id})")
+                                except Exception as seed_err:
+                                    await bot.backend.fail_action(
+                                        action_id,
+                                        bot.worker_id,
+                                        "SeedMessageFailed",
+                                        f"Thread created but failed to post seed message: {seed_err}",
+                                        retryable=True,
+                                    )
+                                    continue
+
+                            # Persist Discord Thread Mapping durably
+                            mapping_saved = await bot.backend.set_topic_thread(
+                                topic_id=topic_id,
+                                guild_id=guild_id,
+                                channel_id=source_channel_id,
+                                discord_thread_id=str(thread.id),
+                            )
+                            if not mapping_saved:
+                                await bot.backend.fail_action(
+                                    action_id,
+                                    bot.worker_id,
+                                    "MappingPersistenceFailed",
+                                    f"Failed to persist topic-thread mapping to backend API for topic {topic_id}",
+                                    retryable=True,
+                                )
+                                continue
+
+                            # Mark action completed
+                            completed = await bot.backend.complete_action(
+                                action_id,
+                                bot.worker_id,
+                                discord_thread_id=str(thread.id),
+                                discord_message_id=str(seed_message.id) if seed_message else None,
+                            )
+                            if completed:
+                                print(f"✨ [ACTION] CREATE_THREAD completed successfully for Topic '{title}' (Thread: {thread.id})")
+                            else:
+                                print(f"⚠️ [ACTION] Failed to complete action {action_id} in Backend API")
+
+                            continue
+
+                        # ---------------------------------------------------------
+                        # 2. Action Type: APPEND_MESSAGE (Forward into Topic Thread)
+                        # ---------------------------------------------------------
+                        elif action_type == "APPEND_MESSAGE":
+                            thread_id = action.get("discord_thread_id")
+                            if not thread_id:
+                                topic_info = await bot.backend.get_topic(guild_id, topic_id)
+                                if topic_info:
+                                    thread_id = topic_info.get("discord_thread_id")
+
+                            if not thread_id:
+                                await bot.backend.fail_action(
+                                    action_id,
+                                    bot.worker_id,
+                                    "ThreadNotReady",
+                                    f"Topic {topic_id} does not have a mapped Discord thread yet",
+                                    retryable=True,
+                                )
+                                continue
+
+                            thread = None
+                            try:
+                                thread = bot.get_channel(int(thread_id))
+                                if thread is None:
+                                    thread = await bot.fetch_channel(int(thread_id))
+                            except discord.NotFound:
+                                await bot.backend.fail_action(
+                                    action_id,
+                                    bot.worker_id,
+                                    "ThreadNotFound",
+                                    f"Mapped thread {thread_id} not found on Discord",
+                                    retryable=False,
+                                )
+                                continue
+                            except Exception as th_err:
+                                await bot.backend.fail_action(
+                                    action_id,
+                                    bot.worker_id,
+                                    "ThreadFetchError",
+                                    f"Transient error fetching thread {thread_id}: {th_err}",
+                                    retryable=True,
+                                )
+                                continue
+
+                            if getattr(thread, "archived", False):
+                                try:
+                                    await thread.edit(archived=False)
+                                except Exception:
+                                    pass
+
+                            # Duplicate check before forwarding (idempotency)
+                            source_message_id = payload.get("source_message_id")
+                            is_already_forwarded = False
+                            try:
+                                async for m in thread.history(limit=25, oldest_first=False):
+                                    if (
+                                        m.author.id == bot.user.id
+                                        and source_message_id
+                                        and f"*(msg: {source_message_id})*" in m.content
+                                    ):
+                                        is_already_forwarded = True
+                                        print(f"ℹ️ [FORWARD] Message {source_message_id} is already forwarded in thread {thread.id}")
+                                        break
+                            except Exception as hist_err:
+                                print(f"⚠️ [FORWARD] Failed to check history for duplicate in thread {thread.id}: {hist_err}")
+                                await bot.backend.fail_action(
+                                    action_id,
+                                    bot.worker_id,
+                                    "ThreadHistoryCheckFailed",
+                                    f"Failed to inspect history of thread {thread.id}: {hist_err}",
+                                    retryable=True,
+                                )
+                                continue
+
+                            if not is_already_forwarded:
+                                source_author = payload.get("source_author_name", "Member")
+                                source_author_id = payload.get("source_author_id")
+                                source_content = payload.get("source_content", "")
+                                source_created_at = payload.get("source_created_at")
+
+                                ts_formatted = ""
+                                if source_created_at:
+                                    try:
+                                        dt = datetime.fromisoformat(str(source_created_at).replace("Z", "+00:00"))
+                                        ts_formatted = dt.strftime("%Y-%m-%d %H:%M")
+                                    except Exception:
+                                        ts_formatted = str(source_created_at)
+
+                                author_display = f"**{source_author}**"
+                                if source_author_id:
+                                    author_display += f" (<@{source_author_id}>)"
+
+                                display_content = source_content.strip()
+                                if len(display_content) > 1700:
+                                    display_content = display_content[:1700] + "... *(content truncated)*"
+
+                                quoted_content = (
+                                    "\n".join(f"> {line}" for line in display_content.splitlines())
+                                    if display_content
+                                    else "> *(no text content)*"
+                                )
+
+                                jump_url = (
+                                    f"https://discord.com/channels/{guild_id}/{source_channel_id}/{source_message_id}"
+                                    if source_message_id
+                                    else ""
+                                )
+                                meta_part = f"\n🔗 [Original Message]({jump_url})" if jump_url else ""
+                                if source_message_id:
+                                    meta_part += f" · *(msg: {source_message_id})*"
+
+                                forward_text = (
+                                    f"{author_display} · {ts_formatted}\n"
+                                    f"{quoted_content}"
+                                    f"{meta_part}"
+                                )
+
+                                try:
+                                    sent_msg = await thread.send(forward_text)
+                                    print(f"💬 [FORWARD] Forwarded message from {source_author} into thread '{thread.name}' (Msg ID: {sent_msg.id})")
+                                except Exception as send_err:
+                                    await bot.backend.fail_action(
+                                        action_id,
+                                        bot.worker_id,
+                                        "ForwardMessageFailed",
+                                        f"Failed to forward message into thread {thread.id}: {send_err}",
+                                        retryable=True,
+                                    )
+                                    continue
+
+                            await bot.backend.complete_action(
+                                action_id,
+                                bot.worker_id,
+                                discord_thread_id=str(thread.id),
+                                discord_message_id=str(source_message_id or action_id),
+                            )
+                            continue
+
+                        # Fetch guild settings to find output channel (for UPSERT_SUMMARY)
                         settings = await bot.backend.get_guild_settings(guild_id)
                         output_channel_id = settings.get("output_channel_id")
 
@@ -1234,61 +1744,7 @@ def create_bot() -> commands.Bot:
                             continue
 
                         # Handle Action Types
-                        if action_type == "CREATE_THREAD":
-                            title = payload.get("title", "Chủ đề thảo luận mới")
-                            source_author = payload.get("source_author_name", "Thành viên")
-                            source_content = payload.get("source_content", "")
-
-                            content_preview = (
-                                (source_content[:280] + "...")
-                                if len(source_content) > 280
-                                else source_content
-                            )
-
-                            announcement = (
-                                f"🥥 **[CHỦ ĐỀ MỚI ĐƯỢC PHÂN LOẠI]**\n"
-                                f"📌 **Chủ đề:** {title}\n"
-                                f"👤 **Khởi xướng bởi:** {source_author} tại <#{source_channel_id}>\n"
-                                f"💭 **Nội dung:**\n> {content_preview}"
-                            )
-
-                            sent_msg = await target_channel.send(announcement)
-                            thread = None
-                            # If channel is a TextChannel, create a dedicated thread
-                            if hasattr(sent_msg, "create_thread"):
-                                try:
-                                    thread = await sent_msg.create_thread(
-                                        name=f"🥥 {title}"[:100],
-                                        auto_archive_duration=1440,
-                                    )
-                                except Exception as exc:
-                                    print(f"ℹ️ Không thể tạo thread cho topic ({type(exc).__name__}), dùng message ID thay thế.")
-
-                            discord_thread_id = str(thread.id) if thread else str(sent_msg.id)
-                            discord_message_id = str(sent_msg.id)
-
-                            await bot.backend.complete_action(
-                                action_id,
-                                bot.worker_id,
-                                discord_thread_id=discord_thread_id,
-                                discord_message_id=discord_message_id,
-                            )
-                            print(f"✨ [ACTION] Đã gửi thông báo Topic '{title}' tới kênh {target_channel.name}")
-
-                        elif action_type == "APPEND_MESSAGE":
-                            source_author = payload.get("source_author_name", "Thành viên")
-                            source_content = payload.get("source_content", "")
-                            # Append note to thread if available
-                            await target_channel.send(
-                                f"💬 **{source_author}** (từ <#{source_channel_id}>): {source_content}"
-                            )
-                            await bot.backend.complete_action(
-                                action_id,
-                                bot.worker_id,
-                                discord_message_id=str(action_id),
-                            )
-
-                        elif action_type == "UPSERT_SUMMARY":
+                        if action_type == "UPSERT_SUMMARY":
                             summary_data = payload.get("summary", {})
                             version = payload.get("version", 1)
                             title = summary_data.get("title", "Tóm tắt thảo luận")
@@ -1721,17 +2177,36 @@ def create_bot() -> commands.Bot:
         selected_topic = topics[topic_id - 1]
         real_topic_id = selected_topic.get("id") or selected_topic.get("topic_id")
 
+        # 1. Retrieve discussion messages belonging to this topic
+        topic_messages = await bot.backend.get_topic_messages(
+            guild_id=guild_id, topic_id=real_topic_id, limit=50
+        )
+
+        # 2. Retrieve topic summary from backend
         summary = await bot.backend.get_topic_summary(
             guild_id=guild_id,
             topic_id=real_topic_id,
             channel_id=channel_id,
         )
         if not summary:
-            await interaction.followup.send(
-                f"⚠️ Could not load summary for topic `#{topic_id}` (`{selected_topic.get('title', 'Untitled')}`).",
-                ephemeral=True,
-            )
-            return
+            if topic_messages:
+                overview_lines = [
+                    f"• **{m.get('author_name', 'Member')}**: {m.get('content', '')[:120]}"
+                    for m in topic_messages[:5]
+                ]
+                summary = {
+                    "title": selected_topic.get("title", "Discussion Topic"),
+                    "overview": "\n".join(overview_lines),
+                    "status": selected_topic.get("status", "ACTIVE"),
+                    "version": 1,
+                    "source_message_ids": [m.get("message_id") for m in topic_messages if m.get("message_id")],
+                }
+            else:
+                await interaction.followup.send(
+                    f"⚠️ Could not load summary or messages for topic `#{topic_id}` (`{selected_topic.get('title', 'Untitled')}`).",
+                    ephemeral=True,
+                )
+                return
 
         summary_embed = build_topic_summary_embed(
             index=topic_id,
@@ -1739,6 +2214,29 @@ def create_bot() -> commands.Bot:
             summary=summary,
             channel_name=channel_name,
         )
+
+        # 3. Publish summary through the configured output channel
+        out_channel = None
+        if output_channel_id:
+            try:
+                out_channel = bot.get_channel(int(output_channel_id))
+                if out_channel is None:
+                    out_channel = await bot.fetch_channel(int(output_channel_id))
+            except Exception:
+                out_channel = None
+
+        if out_channel:
+            try:
+                sent_out = await out_channel.send(embed=summary_embed)
+                await interaction.followup.send(
+                    f"✅ Summary for topic **#{topic_id} — {selected_topic.get('title')}** has been published to <#{output_channel_id}>: {sent_out.jump_url}",
+                    embed=summary_embed,
+                    ephemeral=True,
+                )
+                return
+            except Exception as send_out_err:
+                print(f"⚠️ Could not post summary to output channel {output_channel_id}: {send_out_err}")
+
         await interaction.followup.send(embed=summary_embed, ephemeral=True)
 
     @bot.tree.command(name="ping", description="Check whether Coconerd Bot is responsive and measure gateway latency")

@@ -51,6 +51,8 @@ from backend.presentation.api.schemas import (
     MessageIngestResponse,
     ModelConfigRequest,
     ModelConfigResponse,
+    TopicThreadMappingRequest,
+    TopicThreadMappingResponse,
 )
 from backend.presentation.api.security import admin_key_dependency, bot_key_dependency, verify_key
 
@@ -97,13 +99,6 @@ def create_app(
             if scope["type"] != "http":
                 await self.inner_app(scope, receive, send)
                 return
-
-            # Normalize consecutive slashes in request path to prevent routing mismatches or redirect loops
-            path = scope.get("path", "")
-            if "//" in path:
-                while "//" in path:
-                    path = path.replace("//", "/")
-                scope["path"] = path
 
             request_id = None
             content_length_str = None
@@ -491,18 +486,26 @@ def create_app(
             body.worker_id, body.limit, app_settings.action_lease_seconds
         )
         await session.commit()
-        return [
-            ActionResponse(
-                action_id=action.id,
-                type=action.action_type,
-                topic_id=action.topic_id,
-                guild_id=action.guild_id,
-                channel_id=action.channel_id,
-                payload=action.payload,
-                status=action.status,
+        response_items: list[ActionResponse] = []
+        for action in actions:
+            thread_id = action.discord_thread_id
+            if not thread_id and action.topic_id:
+                topic = await session.get(TopicRecord, action.topic_id)
+                if topic:
+                    thread_id = topic.discord_thread_id
+            response_items.append(
+                ActionResponse(
+                    action_id=action.id,
+                    type=action.action_type,
+                    topic_id=action.topic_id,
+                    guild_id=action.guild_id,
+                    channel_id=action.channel_id,
+                    payload=action.payload,
+                    status=action.status,
+                    discord_thread_id=thread_id,
+                )
             )
-            for action in actions
-        ]
+        return response_items
 
     @app.post(
         "/api/v1/actions/{action_id}/complete",
@@ -543,6 +546,11 @@ def create_app(
             if topic is None or topic.guild_id != action.guild_id:
                 raise HTTPException(status_code=409, detail="Action topic is inconsistent")
             if action.action_type == "CREATE_THREAD":
+                if topic.discord_thread_id and topic.discord_thread_id != body.discord_thread_id:
+                    raise HTTPException(
+                        status_code=409,
+                        detail=f"Topic already has a different discord_thread_id: {topic.discord_thread_id}",
+                    )
                 topic.discord_thread_id = body.discord_thread_id
         await session.commit()
         return {"action_id": action.id, "status": action.status}
@@ -658,6 +666,44 @@ def create_app(
             "discord_thread_id": topic.discord_thread_id,
             "last_activity": topic.last_activity_at.isoformat() if topic.last_activity_at else None,
         }
+
+    @app.put(
+        "/api/v1/topics/{topic_id}/thread",
+        response_model=TopicThreadMappingResponse,
+        tags=["topics"],
+        dependencies=bot_dependencies,
+    )
+    async def set_topic_thread(
+        topic_id: str,
+        body: TopicThreadMappingRequest,
+        session: AsyncSession = Depends(get_session),
+    ) -> TopicThreadMappingResponse:
+        topic = await session.scalar(
+            select(TopicRecord).where(
+                TopicRecord.id == topic_id, TopicRecord.guild_id == body.guild_id
+            )
+        )
+        if topic is None:
+            raise HTTPException(status_code=404, detail="Topic not found")
+        if topic.channel_id != body.channel_id:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Channel mismatch: topic belongs to {topic.channel_id}, got {body.channel_id}",
+            )
+        if topic.discord_thread_id and topic.discord_thread_id != body.discord_thread_id:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Topic already mapped to different thread {topic.discord_thread_id}",
+            )
+        topic.discord_thread_id = body.discord_thread_id
+        await session.commit()
+        return TopicThreadMappingResponse(
+            status="ok",
+            topic_id=topic.id,
+            guild_id=topic.guild_id,
+            channel_id=topic.channel_id,
+            discord_thread_id=topic.discord_thread_id,
+        )
 
     @app.get(
         "/api/v1/topics/{topic_id}/messages",

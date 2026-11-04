@@ -64,6 +64,21 @@ class ActionResponse(BaseModel):
     channel_id: str
     payload: dict[str, Any]
     status: str
+    discord_thread_id: str | None = None
+
+
+class TopicThreadMappingRequest(BaseModel):
+    guild_id: str = Field(min_length=1, max_length=100)
+    channel_id: str = Field(min_length=1, max_length=100)
+    discord_thread_id: str = Field(min_length=1, max_length=100)
+
+
+class TopicThreadMappingResponse(BaseModel):
+    status: str = "ok"
+    topic_id: str
+    guild_id: str
+    channel_id: str
+    discord_thread_id: str
 
 
 class GuildSettingsRequest(BaseModel):

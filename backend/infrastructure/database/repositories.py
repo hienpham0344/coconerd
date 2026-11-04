@@ -138,6 +138,7 @@ class TopicRepository:
             version=1,
         )
         self.session.add(record)
+        await self.session.flush()
         return record
 
     async def list_for_guild(

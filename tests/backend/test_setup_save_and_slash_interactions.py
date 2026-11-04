@@ -99,7 +99,7 @@ async def test_backend_client_update_guild_settings_uses_admin_api(
 async def test_backend_client_url_construction_strips_trailing_slashes():
     """Verifies BackendClient strips trailing/leading slashes from guild_id and base_url."""
     client = BackendClient(
-        base_url="http://testserver///",
+        base_url="http://localhost:8000///",
         api_key="bot-key",
         admin_api_key="admin-key",
     )
@@ -108,7 +108,7 @@ async def test_backend_client_url_construction_strips_trailing_slashes():
         async def __aenter__(self):
             resp = AsyncMock()
             resp.status = 200
-            resp.json = AsyncMock(return_value={"guild_id": "guild-slash", "enabled": True})
+            resp.json = AsyncMock(return_value={"guild_id": "1563563959339061338", "enabled": True})
             return resp
 
         async def __aexit__(self, exc_type, exc_val, exc_tb):
@@ -116,17 +116,26 @@ async def test_backend_client_url_construction_strips_trailing_slashes():
 
     session = AsyncMock()
     session.put = MagicMock(return_value=MockContextManager())
+    session.get = MagicMock(return_value=MockContextManager())
     client.get_session = AsyncMock(return_value=session)
 
+    # 1. Update guild settings URL verification
     res = await client.update_guild_settings(
-        guild_id="guild-slash///",
+        guild_id="1563563959339061338///",
         allowed_channel_ids=["c1"],
         output_channel_id=None,
     )
     assert res is not None
     called_url, called_kwargs = session.put.call_args
-    assert called_url[0] == "http://testserver/api/v1/admin/guilds/guild-slash/settings"
+    assert called_url[0] == "http://localhost:8000/api/v1/admin/guilds/1563563959339061338/settings"
     assert "//settings" not in called_url[0]
+
+    # 2. Get guild settings URL verification
+    res_get = await client.get_guild_settings("1563563959339061338///", force_refresh=True)
+    assert res_get is not None
+    called_get_url, _ = session.get.call_args
+    assert called_get_url[0] == "http://localhost:8000/api/v1/guilds/1563563959339061338/settings"
+    assert "//settings" not in called_get_url[0]
 
 
 @pytest.mark.asyncio
@@ -350,24 +359,153 @@ async def test_admin_api_requires_configuration_body(api_client):
 
 
 @pytest.mark.asyncio
-async def test_admin_api_normalizes_double_slashes(api_client):
-    """Verifies that Backend API normalizes double slashes (e.g. //settings) and accepts valid payloads."""
+async def test_request_limit_middleware_preserves_body_for_fastapi(api_client):
+    """Verifies RequestLimitMiddleware streams the request body to FastAPI intact without dropping bytes."""
     client = api_client
     admin_key = "admin-test-key"
 
     valid_payload = {
         "enabled": True,
-        "allowed_channel_ids": ["ch-a", "ch-b"],
-        "output_channel_id": "ch-out",
+        "allowed_channel_ids": ["ch-alpha", "ch-beta"],
+        "output_channel_id": "ch-gamma",
         "retention_days": 180,
     }
-    # Requesting with double slash //settings
     resp = await client.put(
-        "/api/v1/admin/guilds/test-double-slash//settings",
-        headers={"X-Admin-API-Key": admin_key},
+        "/api/v1/admin/guilds/test-body-preserved-guild/settings",
+        headers={"X-Admin-API-Key": admin_key, "Content-Type": "application/json"},
         json=valid_payload,
     )
     assert resp.status_code == 200, resp.text
     data = resp.json()
-    assert data["guild_id"] == "test-double-slash"
-    assert data["allowed_channel_ids"] == ["ch-a", "ch-b"]
+    assert data["guild_id"] == "test-body-preserved-guild"
+    assert data["enabled"] is True
+    assert data["allowed_channel_ids"] == ["ch-alpha", "ch-beta"]
+    assert data["output_channel_id"] == "ch-gamma"
+    assert resp.headers.get("X-Content-Type-Options") == "nosniff"
+    assert "X-Request-ID" in resp.headers
+
+
+@pytest.mark.asyncio
+async def test_request_limit_middleware_enforces_configured_size_limit(tmp_path):
+    """Verifies RequestLimitMiddleware rejects oversized payloads with HTTP 413 and security headers."""
+    from httpx import ASGITransport, AsyncClient
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from backend.config import Settings
+    from backend.presentation.api.app import create_app
+
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'mw_limit.db'}")
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    settings = Settings(
+        _env_file=None,
+        database_url="sqlite+aiosqlite:///:memory:",
+        bot_api_key="bot-test-key",
+        admin_api_key="admin-test-key",
+        max_request_bytes=100,  # Strict low limit for testing
+    )
+    app = create_app(settings=settings, session_factory=factory)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        # Construct payload exceeding 100 bytes
+        oversized_payload = {
+            "enabled": True,
+            "allowed_channel_ids": ["ch-" + ("x" * 150)],
+            "output_channel_id": "ch-out",
+            "retention_days": 365,
+        }
+        resp = await client.put(
+            "/api/v1/admin/guilds/test-limit-guild/settings",
+            headers={"X-Admin-API-Key": "admin-test-key", "Content-Type": "application/json"},
+            json=oversized_payload,
+        )
+        assert resp.status_code == 413
+        assert resp.headers.get("X-Content-Type-Options") == "nosniff"
+        assert "X-Request-ID" in resp.headers
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_setup_save_retry_preserved_on_backend_failure():
+    """Verifies Setup UI remains active and unstopped if backend save fails, allowing retry."""
+    bot = create_bot()
+    bot.backend.update_guild_settings = AsyncMock(return_value=None)
+    bot.backend.last_error = "Validation error (invalid channel selection or settings format)"
+
+    mock_guild = MagicMock(spec=discord.Guild)
+    mock_guild.id = 123456789
+    mock_guild.name = "Test Guild"
+    mock_guild.channels = []
+
+    mock_admin = MagicMock(spec=discord.Member)
+    mock_admin.id = 999999999
+
+    view = SetupConfigView(
+        bot=bot,
+        guild=mock_guild,
+        admin=mock_admin,
+        current_settings={"guild_id": "123456789"},
+    )
+
+    interaction = MagicMock(spec=discord.Interaction)
+    interaction.response = MagicMock()
+    interaction.response.is_done = MagicMock(return_value=False)
+    interaction.response.defer = AsyncMock()
+    interaction.followup = MagicMock()
+    interaction.followup.send = AsyncMock()
+
+    await view.on_save(interaction)
+
+    interaction.response.defer.assert_called_once_with(ephemeral=True)
+    interaction.followup.send.assert_called_once()
+    sent_msg = interaction.followup.send.call_args[0][0]
+    assert "Failed to save configuration" in sent_msg
+    assert "preserved so you can retry" in sent_msg
+    # Crucial: view must not be stopped on failure so the administrator can retry
+    assert view.is_finished() is False
+
+
+@pytest.mark.asyncio
+async def test_setup_save_success_confirms_and_cleans_up():
+    """Verifies Setup UI confirms persistence and stops view on successful save."""
+    bot = create_bot()
+    bot.backend.update_guild_settings = AsyncMock(
+        return_value={
+            "guild_id": "123456789",
+            "enabled": True,
+            "allowed_channel_ids": [],
+            "output_channel_id": None,
+            "retention_days": 365,
+        }
+    )
+
+    mock_guild = MagicMock(spec=discord.Guild)
+    mock_guild.id = 123456789
+    mock_guild.name = "Test Guild"
+    mock_guild.channels = []
+
+    mock_admin = MagicMock(spec=discord.Member)
+    mock_admin.id = 999999999
+
+    view = SetupConfigView(
+        bot=bot,
+        guild=mock_guild,
+        admin=mock_admin,
+        current_settings={"guild_id": "123456789"},
+    )
+
+    interaction = MagicMock(spec=discord.Interaction)
+    interaction.response = MagicMock()
+    interaction.response.is_done = MagicMock(return_value=False)
+    interaction.response.defer = AsyncMock()
+    interaction.followup = MagicMock()
+    interaction.followup.send = AsyncMock()
+    interaction.delete_original_response = AsyncMock()
+
+    await view.on_save(interaction)
+
+    interaction.response.defer.assert_called_once_with(ephemeral=True)
+    interaction.followup.send.assert_called_once()
+    sent_msg = interaction.followup.send.call_args[0][0]
+    assert "CONFIGURATION SAVED SUCCESSFULLY" in sent_msg
+    # Crucial: view must be finished/stopped on success
+    assert view.is_finished() is True
+    interaction.delete_original_response.assert_called_once()
