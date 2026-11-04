@@ -2,6 +2,8 @@
 
 Backend là modular monolith: một codebase, API và worker chạy thành hai tiến trình, dùng chung database. Nghiệp vụ được chia thành module có service, persistence port và router tương ứng. Discord bot do ứng dụng bên ngoài đảm nhiệm.
 
+Cây thư mục tổng quan ở [README](../README.md#cấu-trúc-repository). Từ checkout mới, làm theo [setup backend/DB](BACKEND_SETUP.md); phía bot dùng [hướng dẫn tích hợp](BOT_INTEGRATION.md).
+
 ## Tra cứu theo nghiệp vụ
 
 | Nghiệp vụ | HTTP | Use case | Persistence |
@@ -52,6 +54,7 @@ Unit of Work dùng session SQLAlchemy của entrypoint; repository chỉ trả D
 Chạy tại thư mục gốc repository:
 
 ```bash
+mkdir -p data
 alembic upgrade head
 organizer-api
 # Terminal khác, cùng thư mục và cấu hình:
@@ -62,7 +65,7 @@ API mặc định ở `http://localhost:8000`, Swagger ở `/docs`, OpenAPI ở 
 
 `COCONERD_DATABASE_URL` mặc định là `sqlite+aiosqlite:///./data/coconerd.db`: file `data/coconerd.db` tương đối với thư mục chạy lệnh. API, worker và Alembic phải trỏ vào cùng database. Có thể đặt URL tuyệt đối như `sqlite+aiosqlite:////absolute/path/coconerd.db` để tránh phụ thuộc thư mục chạy. Không lưu dữ liệu nghiệp vụ trong RAM của API.
 
-Schema nằm ở `backend/infrastructure/database/models.py`, migration ở `alembic/`; xem [schema dữ liệu](DATA_SCHEMA.md). Ứng dụng không tự migrate khi startup. Connection bật SQLite foreign keys; refactor này không đổi bảng, migration hay engine.
+Schema nằm ở `backend/infrastructure/database/models.py`, migration ở `alembic/`; xem [schema dữ liệu](DATA_SCHEMA.md). Ứng dụng không tự migrate khi startup. Connection ứng dụng bật SQLite foreign keys. Revision `20261104_0003` bổ sung trạng thái review/sync, action lease token và backfill alias tìm kiếm; sao lưu DB trước khi nâng cấp.
 
 ## Vận hành
 
