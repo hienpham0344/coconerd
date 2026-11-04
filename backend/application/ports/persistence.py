@@ -63,6 +63,9 @@ class MessagesRepository(Protocol):
 
 
 class TopicsRepository(Protocol):
+    async def list_for_channel(
+        self, guild_id: str, channel_id: str | None, include_closed: bool, limit: int
+    ) -> Sequence[TopicReadModel]: ...
     async def search(
         self, guild_id: str, query: str, limit: int = 30
     ) -> Sequence[TopicReadModel]: ...
@@ -112,6 +115,7 @@ class ActionsRepository(Protocol):
 
 
 class GuildsRepository(Protocol):
+    async def get_settings(self, guild_id: str) -> GuildSettings | None: ...
     async def save_settings(self, settings: GuildSettings) -> GuildSettings: ...
     async def delete_data(self, guild_id: str) -> None: ...
 

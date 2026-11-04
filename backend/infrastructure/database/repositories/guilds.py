@@ -22,6 +22,18 @@ class GuildRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
+    async def get_settings(self, guild_id: str) -> GuildSettings | None:
+        record = await self.session.get(GuildSettingsRecord, guild_id)
+        if record is None:
+            return None
+        return GuildSettings(
+            record.guild_id,
+            record.enabled,
+            record.allowed_channel_ids,
+            record.retention_days,
+            record.output_channel_id,
+        )
+
     async def channel_is_enabled(self, guild_id: str, channel_id: str) -> bool:
         setting = await self.session.get(GuildSettingsRecord, guild_id)
         return bool(setting and setting.enabled and channel_id in setting.allowed_channel_ids)
@@ -34,6 +46,7 @@ class GuildRepository:
         record.enabled = settings.enabled
         record.allowed_channel_ids = settings.allowed_channel_ids
         record.retention_days = settings.retention_days
+        record.output_channel_id = settings.output_channel_id
         return settings
 
     async def delete_data(self, guild_id: str) -> None:

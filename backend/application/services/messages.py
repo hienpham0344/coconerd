@@ -96,7 +96,7 @@ async def process_message_record(
             decision.outcome = "defer"
             decision.reason = "provider proposed a new topic without a title"
         else:
-            entity = ConversationTopic.create(message.guild_id, decision.title)
+            entity = ConversationTopic.create(message.guild_id, decision.title, message.channel_id)
             entity.description = decision.description
             entity.last_activity_at = message.created_at
             topic = await uow.topics.create(entity)

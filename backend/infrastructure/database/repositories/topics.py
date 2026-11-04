@@ -24,6 +24,29 @@ from backend.infrastructure.database.topic_index import index_topic
 
 
 class TopicRepository:
+    async def list_for_channel(
+        self, guild_id: str, channel_id: str | None, include_closed: bool, limit: int
+    ) -> list[TopicReadModel]:
+        query = (
+            select(TopicRecord, func.count(MessageTopicAssociationRecord.id))
+            .outerjoin(
+                MessageTopicAssociationRecord,
+                (MessageTopicAssociationRecord.topic_id == TopicRecord.id)
+                & (MessageTopicAssociationRecord.guild_id == TopicRecord.guild_id),
+            )
+            .where(TopicRecord.guild_id == guild_id)
+        )
+        if channel_id is not None:
+            query = query.where(TopicRecord.channel_id == channel_id)
+        if not include_closed:
+            query = query.where(TopicRecord.status != TopicStatus.CLOSED)
+        rows = await self.session.execute(
+            query.group_by(TopicRecord.id)
+            .order_by(TopicRecord.last_activity_at.desc(), TopicRecord.id)
+            .limit(limit)
+        )
+        return [_topic_read_model(record, count) for record, count in rows]
+
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
@@ -86,6 +109,7 @@ class TopicRepository:
             id=topic.id,
             guild_id=topic.guild_id,
             title=topic.title,
+            channel_id=topic.channel_id,
             description=topic.description,
             status=topic.status.value,
             last_activity_at=topic.last_activity_at,
@@ -232,7 +256,7 @@ class TopicRepository:
         )
 
 
-def _topic_read_model(record: TopicRecord) -> TopicReadModel:
+def _topic_read_model(record: TopicRecord, message_count: int = 0) -> TopicReadModel:
     return TopicReadModel(
         id=record.id,
         guild_id=record.guild_id,
@@ -243,4 +267,6 @@ def _topic_read_model(record: TopicRecord) -> TopicReadModel:
         version=record.version if record.version is not None else 1,
         discord_thread_id=record.discord_thread_id,
         sync_paused=record.sync_paused,
+        channel_id=record.channel_id,
+        message_count=message_count,
     )

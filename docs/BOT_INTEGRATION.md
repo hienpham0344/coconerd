@@ -1,5 +1,11 @@
 # Tích hợp Discord bot
 
+Repo có sẵn consumer trong `bot/`: chạy `python -m pip install -r bot/requirements.txt`,
+sau đó `python -m bot.main`. `/setup` cấu hình channel trực tiếp trong Discord;
+`/summarize topic_id:0` liệt kê topic trong Input Channel. Consumer claim từng action,
+gửi lại `lease_token` khi ACK và lưu mapping Thread bằng completion có lease.
+Các kiểm thử tự động dùng Discord mocks; vẫn cần kiểm thử quyền và delivery trên guild pilot.
+
 Đối tượng: người viết bot bằng Discord SDK bất kỳ. Backend không giữ Discord token, không gọi Discord API và không cung cấp SDK client riêng. Trước tiên hoàn tất [setup backend/DB](BACKEND_SETUP.md); schema HTTP chuẩn nằm trong [API contract](API_CONTRACT.md) và `/openapi.json`.
 
 ## 1. Thông tin cần bàn giao

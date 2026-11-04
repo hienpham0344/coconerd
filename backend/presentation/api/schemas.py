@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class MessageIngestRequest(BaseModel):
@@ -64,6 +64,13 @@ class GuildSettingsRequest(BaseModel):
     enabled: bool
     allowed_channel_ids: list[str] = Field(max_length=200)
     retention_days: int = Field(default=365, ge=1, le=3650)
+    output_channel_id: str | None = Field(default=None, min_length=1, max_length=100)
+
+    @model_validator(mode="after")
+    def separate_input_and_output_channels(self) -> "GuildSettingsRequest":
+        if self.output_channel_id and self.output_channel_id in self.allowed_channel_ids:
+            raise ValueError("Output channel must be separate from input channels")
+        return self
 
 
 class ModelConfigRequest(BaseModel):

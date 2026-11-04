@@ -79,6 +79,23 @@ Khi API kết nối DB và worker có heartbeat, kết quả là `{"status":"ok"
 
 Muốn dùng Meta thật: đặt `COCONERD_MODEL_API_KEY`, đổi `COCONERD_MOCK_LLM=false`, restart worker. Cấu hình mặc định: `muse-spark-1.3`, effort `low`, tối đa 2.048 output tokens/call. Xem [cấu hình model](docs/MODEL_CONFIGURATION.md), gồm override theo guild.
 
+## Chạy Discord bot
+
+```bash
+python -m pip install -r bot/requirements.txt
+python -m bot.main
+```
+
+Đặt `DISCORD_BOT_TOKEN`, `BACKEND_BASE_URL`, `COCONERD_BOT_API_KEY` và
+`COCONERD_ADMIN_API_KEY` trong `.env`. API và worker phải chạy riêng. Groq chỉ
+phục vụ phản hồi personality của bot; worker phân loại vẫn dùng Meta hoặc mock.
+Quản trị viên dùng `/setup` để chọn các Input Channel và một Output Channel riêng.
+Dùng `/summarize topic_id:0` để xem danh sách topic trong Input Channel;
+`/summarize topic_id:1` xem và xuất summary của topic đầu tiên.
+
+Database cũ cần chạy `alembic upgrade head` trước khi khởi động API/worker mới.
+Migration bổ sung cấu hình Output Channel và backfill channel gốc của topic.
+
 ## Cấu trúc repository
 
 ```text

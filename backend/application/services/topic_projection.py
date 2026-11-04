@@ -18,6 +18,7 @@ async def project_topic(
     create_action_id: str | None = None
     source_payload = {
         "source_message_id": message.message_id,
+        "source_author_id": message.author_id,
         "source_author_name": message.author_name,
         "source_created_at": message.created_at.isoformat(),
         "source_content": message.content,

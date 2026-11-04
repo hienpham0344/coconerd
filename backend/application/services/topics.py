@@ -18,6 +18,12 @@ async def get_topic(uow: UnitOfWork, guild_id: str, topic_id: str) -> TopicReadM
     return topic
 
 
+async def list_topics(
+    uow: UnitOfWork, guild_id: str, channel_id: str | None, include_closed: bool, limit: int
+) -> Sequence[TopicReadModel]:
+    return await uow.topics.list_for_channel(guild_id, channel_id, include_closed, limit)
+
+
 async def get_topic_messages(
     uow: UnitOfWork, guild_id: str, topic_id: str, limit: int, before: str | None
 ) -> Sequence[MessageReadModel]:

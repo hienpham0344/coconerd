@@ -225,6 +225,7 @@ async def test_api_service_dto_contracts(monkeypatch):
             "enabled": True,
             "allowed_channel_ids": ["c"],
             "retention_days": 30,
+            "output_channel_id": None,
         }
         response = await client.get(
             "/api/v1/admin/model-config?guild_id=g", headers={"X-Admin-API-Key": "admin-key"}

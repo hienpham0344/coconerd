@@ -92,6 +92,11 @@ class _MessagesPort:
 
 
 class _TopicsPort:
+    async def list_for_channel(
+        self, guild_id: str, channel_id: str | None, include_closed: bool, limit: int
+    ) -> Sequence[TopicReadModel]:
+        return await self._repository.list_for_channel(guild_id, channel_id, include_closed, limit)
+
     async def search(self, guild_id: str, query: str, limit: int = 30) -> Sequence[TopicReadModel]:
         return await self._repository.search(guild_id, query, limit)
 

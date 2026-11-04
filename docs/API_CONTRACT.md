@@ -117,3 +117,19 @@ Five administrator endpoints under `/api/v1/guilds/{guild_id}` use `X-Admin-API-
 See [manual review examples and reconciliation rules](MANUAL_REVIEW.md). Existing endpoints and fields remain. Action claim responses now add `lease_token`; clients must echo it in complete/fail for newly claimed actions (missing/stale token → 409). This is a required bot integration update; existing un-tokenized leases remain compatible until their next claim.
 
 Action lease fencing uses status, owner, expiry and per-claim token; reusing worker_id cannot authorize an ACK from an older claim.
+
+## Discord channel configuration and topics
+
+- `GET /api/v1/guilds/{guild_id}/settings` uses the bot key and returns saved settings.
+- Admin settings writes accept nullable `output_channel_id`; it must be separate from
+  `allowed_channel_ids`. Writes continue to require the admin key.
+- `GET /api/v1/topics?guild_id=...&channel_id=...&include_closed=false&limit=50`
+  lists topics by origin channel, including message counts. The limit is 1–100.
+- Summary reads accept optional `channel_id`; a different origin channel returns 404.
+  This does not replace Discord ACL checks for messages grouped across channels.
+- Completing a leased `CREATE_THREAD` action persists the mapping atomically. A topic
+  already mapped to a different thread returns 409 without completing the action.
+  No separate, unfenced thread-mapping endpoint is exposed.
+
+Run `alembic upgrade head` when upgrading an existing database. The channel migration
+preserves messages and topics and derives legacy origins from the earliest association.

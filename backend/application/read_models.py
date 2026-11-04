@@ -38,6 +38,8 @@ class TopicReadModel:
     version: int
     discord_thread_id: str | None
     sync_paused: bool = False
+    channel_id: str | None = None
+    message_count: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,6 +107,7 @@ class GuildSettings:
     enabled: bool
     allowed_channel_ids: list[str]
     retention_days: int
+    output_channel_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

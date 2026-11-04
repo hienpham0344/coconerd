@@ -59,6 +59,12 @@ async def complete_action(
         topic = await uow.topics.get(action.guild_id, action.topic_id)
         if topic is None or topic.guild_id != action.guild_id:
             raise Conflict("Action topic is inconsistent")
+        if (
+            action.action_type == "CREATE_THREAD"
+            and topic.discord_thread_id
+            and topic.discord_thread_id != discord_thread_id
+        ):
+            raise Conflict("Topic is already mapped to another Discord thread")
     changed = await uow.actions.update_leased(
         action.id,
         worker_id,

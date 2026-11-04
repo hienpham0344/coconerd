@@ -6,6 +6,46 @@ from alembic import command
 from backend.config import get_settings
 
 
+def test_discord_channel_migration_preserves_existing_data(tmp_path, monkeypatch):
+    path = tmp_path / "discord.db"
+    monkeypatch.setenv("COCONERD_DATABASE_URL", f"sqlite+aiosqlite:///{path}")
+    get_settings.cache_clear()
+    try:
+        config = Config("alembic.ini")
+        command.upgrade(config, "20261104_0003")
+        with sqlite3.connect(path) as connection:
+            connection.execute(
+                "INSERT INTO guild_settings VALUES ('g',1,'[\"input\"]',90,'2026-11-04')"
+            )
+            connection.execute(
+                "INSERT INTO topics(id,guild_id,title,description,status,created_at,"
+                "last_activity_at,version) VALUES "
+                "('topic','g','Preserved','','ACTIVE','2026-11-04','2026-11-04',1)"
+            )
+            connection.execute(
+                "INSERT INTO messages(id,guild_id,channel_id,discord_message_id,author_id,"
+                "author_name,content,created_at,ingested_at) VALUES "
+                "('m','g','input','discord-m','u','User','Hello','2026-11-04','2026-11-04')"
+            )
+            connection.execute(
+                "INSERT INTO message_topic_associations(id,guild_id,message_record_id,topic_id,"
+                "kind,confidence,reason) VALUES "
+                "('a','g','m','topic','CLASSIFIED',1,'')"
+            )
+        command.upgrade(config, "head")
+        with sqlite3.connect(path) as connection:
+            assert connection.execute("SELECT title,channel_id FROM topics").fetchone() == (
+                "Preserved",
+                "input",
+            )
+            assert connection.execute(
+                "SELECT retention_days,output_channel_id FROM guild_settings"
+            ).fetchone() == (90, None)
+            assert connection.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+    finally:
+        get_settings.cache_clear()
+
+
 def test_additive_agent_migration_preserves_and_indexes_existing_topics(tmp_path, monkeypatch):
     path = tmp_path / "legacy.db"
     monkeypatch.setenv("COCONERD_DATABASE_URL", f"sqlite+aiosqlite:///{path}")
