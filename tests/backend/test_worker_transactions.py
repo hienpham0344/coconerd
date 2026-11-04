@@ -1,11 +1,16 @@
 """Worker transaction boundary without a SQLite connection."""
 
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
+import pytest
 
 from backend import worker as worker_module
 from backend.application.contracts import ClassificationResult, TopicDecision
 from backend.application.read_models import MessageReadModel
+from backend.infrastructure.meta_provider import MetaOutputTruncatedError, MetaTimeoutError
 
 
 async def _empty_recent(*_args, **_kwargs):
@@ -94,7 +99,9 @@ async def test_completion_failure_rolls_back_staged_classification(monkeypatch):
         raise LookupError("Claimed processing job disappeared")
 
     async def claim_one(_owner, _now, _lease_expires_at):
-        return SimpleNamespace(id="job-1", message_record_id="record-1", guild_id="guild-1")
+        return SimpleNamespace(
+            id="job-1", message_record_id="record-1", guild_id="guild-1", followup_message_id=None
+        )
 
     async def claim_commit():
         return None
@@ -112,10 +119,12 @@ async def test_completion_failure_rolls_back_staged_classification(monkeypatch):
         messages=SimpleNamespace(
             get=get_message,
             recent_before=_empty_recent,
+            evidence_for_topic=_empty_recent,
             add_association=stage_association,
             add_decision=stage_decision,
         ),
         topics=SimpleNamespace(
+            search=_empty_recent,
             candidates=candidates,
             create=create,
             add_episode=stage_episode,
@@ -153,7 +162,8 @@ async def test_completion_failure_rolls_back_staged_classification(monkeypatch):
     async def provider_for_guild(_guild_id):
         return SimpleNamespace(model_id="fake")
 
-    async def fail_job(job_id, error_type):
+    async def fail_job(job_id, error_type, *, retryable=True):
+        assert retryable
         failures.append((job_id, error_type))
 
     worker._provider_for_guild = provider_for_guild
@@ -167,3 +177,34 @@ async def test_completion_failure_rolls_back_staged_classification(monkeypatch):
     assert staged == []
     assert rollbacks == [True]
     assert failures == [("job-1", "LookupError")]
+
+
+@pytest.mark.parametrize(
+    "error,retryable", [(MetaOutputTruncatedError("budget"), False), (MetaTimeoutError(), True)]
+)
+async def test_worker_stops_truncation_but_retries_temporary_failure(monkeypatch, error, retryable):
+    @asynccontextmanager
+    async def session_factory():
+        yield SimpleNamespace()
+
+    monkeypatch.setattr(worker_module, "SqlAlchemyUnitOfWork", lambda session: session)
+    monkeypatch.setattr(
+        worker_module,
+        "claim_job",
+        AsyncMock(
+            return_value=SimpleNamespace(
+                id="job-1", message_record_id="record-1", guild_id="g", followup_message_id=None
+            )
+        ),
+    )
+    monkeypatch.setattr(worker_module, "process_message_record", AsyncMock(side_effect=error))
+    worker = worker_module.ConversationWorker.__new__(worker_module.ConversationWorker)
+    worker.session_factory = session_factory
+    worker.settings = SimpleNamespace(worker_lease_seconds=30)
+    worker.worker_id = "worker-1"
+    worker._provider_for_guild = AsyncMock(return_value=SimpleNamespace(model_id="fake"))
+    worker._fail_job = AsyncMock()
+
+    assert await worker.process_once() is True
+
+    worker._fail_job.assert_awaited_once_with("job-1", type(error).__name__, retryable=retryable)

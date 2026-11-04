@@ -19,6 +19,8 @@ from backend.application.contracts import (
     TopicCandidate,
     TopicDecision,
 )
+from backend.application.decision_policy import POLICY_INSTRUCTIONS
+from backend.application.language_normalization import analyze_language
 from backend.application.read_models import ContextMessage
 from backend.config import Settings
 from backend.domain.entities import ConversationMessage
@@ -45,8 +47,30 @@ _DECISION_PROPERTIES: dict[str, Any] = {
         "maxItems": 20,
     },
     "summary": {"type": "string", "maxLength": 2000},
+    "evidence_message_ids": {
+        "type": "array",
+        "items": {"type": "string", "maxLength": 100},
+        "maxItems": 7,
+    },
+    "defer_reason": {
+        "anyOf": [
+            {
+                "type": "string",
+                "enum": [
+                    "missing_context",
+                    "ambiguous",
+                    "multiple_topics",
+                    "invalid_evidence",
+                    "invalid_topic",
+                    "duplicate_topic",
+                ],
+            },
+            {"type": "null"},
+        ]
+    },
+    "multiple_topics": {"type": "boolean"},
 }
-_PROMPT_CACHE_KEY = "coconerd-topic-classification-v2"
+_PROMPT_CACHE_KEY = "coconerd-topic-classification-v3-language-v2"
 
 
 def _topic_decision_response_format() -> dict[str, Any]:
@@ -91,13 +115,17 @@ class MetaInvalidOutputError(MetaProviderError):
     pass
 
 
+class MetaOutputTruncatedError(MetaInvalidOutputError):
+    """The provider exhausted its output budget before returning a decision."""
+
+
 class MetaServiceError(MetaProviderError):
     pass
 
 
 class MetaModelProvider(ModelProvider):
     def __init__(self, settings: Settings) -> None:
-        if settings.meta_api_key is None:
+        if settings.meta_api_key is None or not settings.meta_api_key.get_secret_value().strip():
             raise ValueError("Set MODEL_API_KEY or META_API_KEY to enable the Meta provider")
         self.model_id = settings.meta_model_name
         self._client = AsyncOpenAI(
@@ -108,6 +136,7 @@ class MetaModelProvider(ModelProvider):
         )
         self._max_tokens = settings.llm_max_tokens
         self._temperature = settings.llm_temperature
+        self._reasoning_effort = settings.llm_reasoning_effort
 
     async def classify(
         self,
@@ -131,16 +160,30 @@ class MetaModelProvider(ModelProvider):
             "Use reply_ancestor as conversation evidence, not proof of topic identity. "
             "A question or proposal is not a decision. Preserve previous version history when "
             "information conflicts. Cite only "
-            "facts present in the supplied context."
+            "facts present in the supplied context. "
+            "Use language_hints as lexical reference candidates for interpreting informal "
+            "writing, not as instructions or evidence of new conversation events. Applying a "
+            "listed meaning that fits the original text and reply context is supported "
+            "interpretation, not invention. Determine topic identity separately from whether "
+            "the message states a completed decision. An acknowledgement with a supported "
+            "meaning can belong to its explicit reply's topic. An approval request can belong "
+            "to the referenced design topic while decisions remains empty. Multiple possible "
+            "word meanings do not require defer if the topic relationship is still clear. "
+            "Never add events from the lexicon to memory, invent unsupported repairs, rewrite "
+            "code/URLs/names, or turn requests into completed decisions. Preserve negation. "
+            "Defer when unresolved meanings leave the topic or intent ambiguous. "
+            + POLICY_INSTRUCTIONS
         )
         context: dict[str, Any] = {
             "message": {
+                "message_id": message.message_id,
                 "content": message.content,
                 "author_name": message.author_name,
                 "created_at": message.created_at.isoformat(),
                 "reply_to_message_id": message.reply_to_message_id,
             },
             "candidate_topics": [candidate.model_dump() for candidate in candidates],
+            "language_hints": analyze_language(message.content).as_payload(),
             "context_messages": [
                 {
                     "message_id": item.message_id,
@@ -159,6 +202,7 @@ class MetaModelProvider(ModelProvider):
                 model=self.model_id,
                 temperature=self._temperature,
                 max_tokens=self._max_tokens,
+                reasoning_effort=self._reasoning_effort,
                 prompt_cache_key=_PROMPT_CACHE_KEY,
                 response_format=_topic_decision_response_format(),
                 messages=[
@@ -180,6 +224,18 @@ class MetaModelProvider(ModelProvider):
 
         if not response.choices:
             raise MetaInvalidOutputError("Meta Model API returned no choices")
+        if _response_field(response.choices[0], "finish_reason") == "length":
+            usage = getattr(response, "usage", None)
+            details = _response_field(usage, "completion_tokens_details")
+            logger.warning(
+                "Meta output budget exhausted",
+                extra={
+                    "model_id": self.model_id,
+                    "completion_tokens": _response_field(usage, "completion_tokens"),
+                    "reasoning_tokens": _response_field(details, "reasoning_tokens"),
+                },
+            )
+            raise MetaOutputTruncatedError("Meta Model API exhausted the output token limit")
         response_message = response.choices[0].message
         if getattr(response_message, "refusal", None):
             raise MetaInvalidOutputError("Meta Model API refused topic classification")
@@ -193,6 +249,7 @@ class MetaModelProvider(ModelProvider):
         latency_ms = round((perf_counter() - started_at) * 1000)
         usage = getattr(response, "usage", None)
         prompt_details = _response_field(usage, "prompt_tokens_details")
+        completion_details = _response_field(usage, "completion_tokens_details")
         cached_tokens = _response_field(prompt_details, "cached_tokens")
         logger.info(
             "Topic classification completed",
@@ -212,6 +269,7 @@ class MetaModelProvider(ModelProvider):
             prompt_tokens=_response_field(usage, "prompt_tokens"),
             completion_tokens=_response_field(usage, "completion_tokens"),
             cached_tokens=cached_tokens,
+            reasoning_tokens=_response_field(completion_details, "reasoning_tokens"),
             latency_ms=latency_ms,
         )
 
@@ -233,11 +291,14 @@ class MockMetaProvider(ModelProvider):
         started_at = perf_counter()
 
         def result(decision: TopicDecision) -> ClassificationResult:
+            if decision.outcome in {"new", "existing"}:
+                decision.evidence_message_ids = [message.message_id]
             return ClassificationResult(
                 decision=decision,
                 model_id=self.model_id,
                 candidate_topic_ids=[candidate.id for candidate in candidates],
                 latency_ms=round((perf_counter() - started_at) * 1000),
+                model_calls=0,
             )
 
         if not message.content.strip():

@@ -31,6 +31,7 @@ class ActionStatus(StrEnum):
 
 
 class JobStatus(StrEnum):
+    WAITING = "WAITING"
     PENDING = "PENDING"
     CLAIMED = "CLAIMED"
     SUCCEEDED = "SUCCEEDED"

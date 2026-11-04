@@ -128,6 +128,28 @@ async def test_claim_and_failure_retry_budget_and_dead_letter(database):
     await fail_job(uow, "missing", "Ignored")
 
 
+async def test_nonretryable_failure_stops_job_and_preserves_message(database):
+    session, uow = database
+    session.add(message("m"))
+    session.flush()
+    session.add(ProcessingJobRecord(id="j", guild_id="g", message_record_id="m", max_attempts=5))
+    session.commit()
+    assert (await claim_job(uow, "worker", 30)).id == "j"
+
+    await fail_job(uow, "j", "MetaOutputTruncatedError", retryable=False)
+
+    session.expire_all()
+    job = session.get(ProcessingJobRecord, "j")
+    assert (job.status, job.attempt_count, job.error_type) == (
+        "DEAD",
+        1,
+        "MetaOutputTruncatedError",
+    )
+    assert job.lease_owner is None and job.lease_expires_at is None
+    assert session.get(MessageRecord, "m") is not None
+    assert await claim_job(uow, "worker", 30) is None
+
+
 @pytest.mark.parametrize(
     "guild_enabled,global_enabled,expected",
     [(True, True, "guild"), (False, True, "global"), (False, False, "default")],

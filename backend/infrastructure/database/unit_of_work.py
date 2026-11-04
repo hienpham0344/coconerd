@@ -30,6 +30,13 @@ from backend.infrastructure.database.repositories.topics import TopicRepository
 
 
 class _MessagesPort:
+    async def evidence_for_topic(
+        self, guild_id: str, channel_id: str, topic_id: str, before: datetime, limit: int = 2
+    ) -> Sequence[MessageReadModel]:
+        return await self._repository.evidence_for_topic(
+            guild_id, channel_id, topic_id, before, limit
+        )
+
     def __init__(self, session: AsyncSession) -> None:
         self._repository = MessageRepository(session)
 
@@ -84,6 +91,9 @@ class _MessagesPort:
 
 
 class _TopicsPort:
+    async def search(self, guild_id: str, query: str, limit: int = 30) -> Sequence[TopicReadModel]:
+        return await self._repository.search(guild_id, query, limit)
+
     async def inactive(self, cutoff: datetime) -> Sequence[TopicReadModel]:
         return await self._repository.inactive(cutoff)
 
@@ -159,6 +169,15 @@ class _ActionsPort:
 
 
 class _JobsPort:
+    async def reserve_model_call(self, job_id: str, owner: str) -> bool:
+        return await self._repository.reserve_model_call(job_id, owner)
+
+    async def wait_for_context(self, job_id: str, until: datetime) -> bool:
+        return await self._repository.wait_for_context(job_id, until)
+
+    async def wake_deferred(self, followup_message_id: str) -> None:
+        await self._repository.wake_deferred(followup_message_id)
+
     def __init__(self, session: AsyncSession) -> None:
         self._repository = JobRepository(session)
 

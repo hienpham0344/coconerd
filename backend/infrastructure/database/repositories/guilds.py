@@ -12,6 +12,7 @@ from backend.infrastructure.database.models import (
     ModelConfigRecord,
     ProcessingJobRecord,
     TopicRecord,
+    TopicSearchTermRecord,
     TopicSummaryRecord,
 )
 
@@ -54,6 +55,9 @@ class GuildRepository:
         )
         await self.session.execute(
             delete(AIDecisionRecord).where(AIDecisionRecord.guild_id == guild_id)
+        )
+        await self.session.execute(
+            delete(TopicSearchTermRecord).where(TopicSearchTermRecord.guild_id == guild_id)
         )
         await self.session.execute(delete(TopicRecord).where(TopicRecord.id.in_(topic_ids)))
         await self.session.execute(delete(MessageRecord).where(MessageRecord.id.in_(message_ids)))

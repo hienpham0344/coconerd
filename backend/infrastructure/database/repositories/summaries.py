@@ -4,7 +4,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.application.read_models import SummaryReadModel
-from backend.infrastructure.database.models import TopicSummaryRecord
+from backend.infrastructure.database.models import TopicRecord, TopicSummaryRecord
+from backend.infrastructure.database.topic_index import index_topic
 
 
 class SummaryRepository:
@@ -51,6 +52,12 @@ class SummaryRepository:
             source_message_ids=source_message_ids,
         )
         self.session.add(record)
+        topic = await self.session.scalar(
+            select(TopicRecord).where(TopicRecord.id == topic_id, TopicRecord.guild_id == guild_id)
+        )
+        if topic is None:
+            raise LookupError("Summary topic is missing or belongs to another guild")
+        await index_topic(self.session, topic, data)
         return record
 
 

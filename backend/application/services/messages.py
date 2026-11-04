@@ -1,12 +1,12 @@
 """Ingestion and classification use cases."""
 
 from backend.application.agent_workflow import create_topic_workflow
-from backend.application.contracts import ClassificationResult, ModelProvider, TopicCandidate
+from backend.application.contracts import ClassificationResult, ModelProvider, TopicDecision
 from backend.application.errors import ChannelNotAllowedError
 from backend.application.ports.persistence import UnitOfWork
 from backend.application.read_models import TopicReadModel
-from backend.application.services.message_context import build_message_context
 from backend.application.services.results import IngestResult, ProcessingResult
+from backend.application.services.topic_tools import TopicTools
 from backend.domain.entities import ConversationMessage, ConversationTopic
 from backend.domain.enums import ActionType, AssociationKind, TopicStatus
 
@@ -17,13 +17,17 @@ def _classification_payload(
     return {
         "decision": result.decision.model_dump(mode="json"),
         "stage": "topic_classification",
+        "policy_version": result.policy_version,
+        "model_calls": result.model_calls,
         "model_id": result.model_id,
         "candidate_topic_ids": result.candidate_topic_ids,
         "context_message_ids": context_message_ids or [],
+        "language_hints": result.language_hints,
         "usage": {
             "prompt_tokens": result.prompt_tokens,
             "completion_tokens": result.completion_tokens,
             "cached_tokens": result.cached_tokens,
+            "reasoning_tokens": result.reasoning_tokens,
             "latency_ms": result.latency_ms,
         },
     }
@@ -35,31 +39,18 @@ async def ingest_message(
     if not await uow.guilds.channel_is_enabled(message.guild_id, message.channel_id):
         raise ChannelNotAllowedError("Guild or channel is not enabled by an administrator")
     record, inserted = await uow.messages.ingest(message, max_attempts)
+    if inserted:
+        await uow.jobs.wake_deferred(record.id)
     await uow.commit()
     return IngestResult(record.id, inserted)
 
 
-async def _summary_candidates(
-    uow: UnitOfWork, topics: list[TopicReadModel], reply_topic_id: str | None = None
-) -> list[TopicCandidate]:
-    result: list[TopicCandidate] = []
-    for topic in topics:
-        summary = await uow.summaries.latest(topic.guild_id, topic.id)
-        result.append(
-            TopicCandidate(
-                id=topic.id,
-                title=topic.title,
-                description=topic.description,
-                status=topic.status,
-                summary=summary.data if summary else {},
-                evidence="direct_reply_target" if topic.id == reply_topic_id else "",
-            )
-        )
-    return result
-
-
 async def process_message_record(
-    uow: UnitOfWork, message_record_id: str, provider: ModelProvider
+    uow: UnitOfWork,
+    message_record_id: str,
+    provider: ModelProvider,
+    *,
+    followup_message_id: str | None = None,
 ) -> ProcessingResult:
     record = await uow.messages.get(message_record_id)
     if record is None:
@@ -75,22 +66,10 @@ async def process_message_record(
         created_at=record.created_at,
         reply_to_message_id=record.reply_to_message_id,
     )
-    candidate_records = list(await uow.topics.candidates(message.guild_id))
-    reply_topic_id: str | None = None
-    if message.reply_to_message_id:
-        associated_topic_id = await uow.messages.reply_topic_id(
-            message.guild_id, message.reply_to_message_id
-        )
-        if associated_topic_id:
-            reply_topic = await uow.topics.get(message.guild_id, associated_topic_id)
-            if reply_topic and reply_topic.status != TopicStatus.CLOSED:
-                reply_topic_id = reply_topic.id
-                if all(candidate.id != reply_topic.id for candidate in candidate_records):
-                    candidate_records.insert(0, reply_topic)
-                else:
-                    candidate_records.sort(key=lambda candidate: candidate.id != reply_topic.id)
-    candidates = await _summary_candidates(uow, candidate_records, reply_topic_id)
-    context = await build_message_context(uow.messages, message)
+    tools_context = await TopicTools(uow).gather(message, followup_message_id)
+    candidates = tools_context.candidates
+    context = tools_context.messages
+    reply_topic_id = tools_context.reply_topic_id
     # Provider work finishes before any classification writes are staged.
     state = await create_topic_workflow(provider).ainvoke(
         {"message": message, "candidates": candidates, "context": context}
@@ -98,28 +77,18 @@ async def process_message_record(
     classification = state["classification"]
     decision = classification.decision
 
-    if decision.outcome == "new" and decision.title:
-        requested_title = " ".join(decision.title.casefold().split())
-        duplicate = next(
-            (
-                candidate
-                for candidate in candidates
-                if " ".join(candidate.title.casefold().split()) == requested_title
-            ),
-            None,
-        )
-        if duplicate:
-            decision.outcome = "existing"
-            decision.topic_id = duplicate.id
-            decision.reason = "new topic title matches an existing guild topic"
-
     topic: TopicReadModel | None = None
     new_topic = False
     if decision.outcome == "existing" and decision.topic_id:
         topic = await uow.topics.get(message.guild_id, decision.topic_id)
         if topic is None or topic.status == TopicStatus.CLOSED:
-            decision.outcome = "defer"
-            decision.reason = "provider selected a missing, closed, or cross-guild topic"
+            classification.decision = decision = TopicDecision(
+                outcome="defer",
+                confidence=0,
+                defer_reason="invalid_topic",
+                reason="provider selected a missing, closed, or cross-guild topic",
+            )
+            topic = None
         elif topic.status == TopicStatus.DORMANT:
             lifecycle = ConversationTopic.create(topic.guild_id, topic.title)
             lifecycle.status = TopicStatus(topic.status)
@@ -268,5 +237,8 @@ async def process_message_record(
                 dependency_id=create_action_id,
             )
     return ProcessingResult(
-        decision.outcome, topic.id if topic else None, classification.candidate_topic_ids
+        decision.outcome,
+        topic.id if topic else None,
+        classification.candidate_topic_ids,
+        decision.defer_reason,
     )

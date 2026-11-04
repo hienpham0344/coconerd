@@ -31,6 +31,10 @@ The backend rejects ingestion for a guild or channel absent from this allowlist.
 
 Response: `{"message_id":"message_001","status":"accepted"}`.
 
+Send each original message with its real timestamp and `reply_to_message_id`; do not combine unrelated messages into a long text. The response acknowledges storage, not a finished topic decision. The server gathers bounded context itself. A later clarification is another normal `POST /messages`; no separate retry or reassessment endpoint is needed.
+
+Ambiguous messages may remain deferred. An explicit reply to the target, or a same-author clarification such as `ý mình là ...`, in the same channel within ten minutes can trigger one reassessment if budget remains. Duplicate delivery does not retrigger it. Deferred/irrelevant messages produce no Discord actions; after expiry a deferred message stays unassigned. Already assigned messages are not automatically moved to another topic. There is currently no public message-decision/job-status endpoint.
+
 ## Claim and acknowledge Discord actions
 
 - `POST /actions/claim` request: `{"worker_id":"bot-worker-01","limit":20}`.

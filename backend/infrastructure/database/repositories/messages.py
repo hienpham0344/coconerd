@@ -19,6 +19,24 @@ class MessageRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
+    async def evidence_for_topic(
+        self, guild_id: str, channel_id: str, topic_id: str, before: datetime, limit: int = 2
+    ) -> list[MessageReadModel]:
+        records = await self.session.scalars(
+            select(MessageRecord)
+            .join(MessageTopicAssociationRecord)
+            .where(
+                MessageRecord.guild_id == guild_id,
+                MessageRecord.channel_id == channel_id,
+                MessageRecord.created_at < before,
+                MessageTopicAssociationRecord.guild_id == guild_id,
+                MessageTopicAssociationRecord.topic_id == topic_id,
+            )
+            .order_by(MessageRecord.created_at.desc(), MessageRecord.discord_message_id)
+            .limit(min(limit, 2))
+        )
+        return [_message_read_model(record) for record in records]
+
     async def ingest(
         self, message: ConversationMessage, max_attempts: int
     ) -> tuple[MessageRecord, bool]:
@@ -132,17 +150,31 @@ class MessageRepository:
         confidence: float,
         reason: str,
     ) -> None:
-        self.session.add(
-            MessageTopicAssociationRecord(
-                id=str(uuid4()),
-                guild_id=guild_id,
-                message_record_id=message_record_id,
-                topic_id=topic_id,
-                kind=kind,
-                confidence=confidence,
-                reason=reason,
+        statement = sqlite_insert(MessageTopicAssociationRecord).values(
+            id=str(uuid4()),
+            guild_id=guild_id,
+            message_record_id=message_record_id,
+            topic_id=topic_id,
+            kind=kind,
+            confidence=confidence,
+            reason=reason,
+        )
+        result = await self.session.execute(
+            statement.on_conflict_do_update(
+                index_elements=["guild_id", "message_record_id"],
+                set_={
+                    "topic_id": topic_id,
+                    "kind": kind,
+                    "confidence": confidence,
+                    "reason": reason,
+                },
+                where=MessageTopicAssociationRecord.kind == "DEFERRED",
             )
         )
+        if result.rowcount != 1:
+            raise RuntimeError(
+                "Message already has a final association; automatic reassignment is forbidden"
+            )
 
     async def add_decision(
         self,

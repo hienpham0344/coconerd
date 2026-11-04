@@ -29,6 +29,19 @@ class TopicDecision(BaseModel):
     open_questions: list[str] = Field(default_factory=list)
     action_items: list[str] = Field(default_factory=list)
     summary: str = ""
+    evidence_message_ids: list[str] = Field(default_factory=list, max_length=7)
+    defer_reason: (
+        Literal[
+            "missing_context",
+            "ambiguous",
+            "multiple_topics",
+            "invalid_evidence",
+            "invalid_topic",
+            "duplicate_topic",
+        ]
+        | None
+    ) = None
+    multiple_topics: bool = False
 
 
 class ClassificationResult(BaseModel):
@@ -38,7 +51,11 @@ class ClassificationResult(BaseModel):
     prompt_tokens: int | None = None
     completion_tokens: int | None = None
     cached_tokens: int | None = None
+    reasoning_tokens: int | None = None
     latency_ms: int
+    policy_version: str = "topic-policy-v3"
+    model_calls: int = 1
+    language_hints: dict[str, object] = Field(default_factory=dict)
 
 
 class ModelProvider(Protocol):

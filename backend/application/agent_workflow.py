@@ -8,8 +8,10 @@ from backend.application.contracts import (
     TopicCandidate,
     TopicDecision,
 )
+from backend.application.decision_policy import classify_locally, validate_classification
+from backend.application.language_normalization import analyze_language
 from backend.application.read_models import ContextMessage
-from backend.application.topic_retriever import retrieve_topic_candidates
+from backend.application.topic_retriever import retrieval_message, retrieve_topic_candidates
 from backend.domain.entities import ConversationMessage
 
 
@@ -26,13 +28,22 @@ class WorkflowState(TypedDict, total=False):
 def create_topic_workflow(provider: ModelProvider):
     def retrieve(state: WorkflowState) -> dict[str, list[TopicCandidate]]:
         return {
-            "retrieved_candidates": retrieve_topic_candidates(state["message"], state["candidates"])
+            "retrieved_candidates": retrieve_topic_candidates(
+                retrieval_message(state["message"], state.get("context", [])), state["candidates"]
+            )
         }
 
     async def classify(state: WorkflowState) -> dict[str, object]:
-        classification = await provider.classify(
-            state["message"], state["retrieved_candidates"], state["context"]
+        classification = classify_locally(state["message"], state["context"])
+        if classification is None:
+            classification = await provider.classify(
+                state["message"], state["retrieved_candidates"], state["context"]
+            )
+        classification = validate_classification(
+            classification, state["message"], state["retrieved_candidates"], state["context"]
         )
+        classification.candidate_topic_ids = [item.id for item in state["retrieved_candidates"]]
+        classification.language_hints = analyze_language(state["message"].content).as_payload()
         return {"classification": classification, "decision": classification.decision}
 
     def outcome(state: WorkflowState) -> str:

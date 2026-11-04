@@ -1,0 +1,513 @@
+{
+  "version": "vi-language-v1",
+  "sources": {
+    "vilexnorm-train": {
+      "title": "ViLexNorm",
+      "authors": [
+        "Thanh-Nhi Nguyen",
+        "Thanh-Phong Le",
+        "Kiet Van Nguyen"
+      ],
+      "url": "https://github.com/ngxtnhi/ViLexNorm",
+      "paper": "https://aclanthology.org/2024.eacl-long.85/",
+      "file": "data/train.csv",
+      "git_blob": "87366de600b78db2a5408f1f1dee51010106fa03",
+      "sha256": "616757088b9103d6f39ea2f790e9469bde5c39f13cfcf0f676aaf840916fc8b1",
+      "license": "CC-BY-NC-SA-4.0",
+      "license_url": "https://creativecommons.org/licenses/by-nc-sa/4.0/",
+      "split": "train",
+      "rows": 8372,
+      "derivation": "Selected token alignments from human-annotated pairs; support counts are not calibrated probabilities. No dev or test data used."
+    },
+    "user-request": {
+      "title": "User-provided meaning of dr do",
+      "date": "2026-11-04",
+      "review_status": "confirmed-by-user"
+    },
+    "project-examples": {
+      "title": "Project-authored abbreviation hypotheses and Telex examples",
+      "review_status": "synthetic-not-human-validated",
+      "note": "Possible interpretations only; not conversation evidence."
+    }
+  },
+  "entries": [
+    {
+      "id": "vln-01",
+      "variants": [
+        "ko"
+      ],
+      "candidates": [
+        "không"
+      ],
+      "kind": "slang",
+      "source": "vilexnorm-train",
+      "retrieval_safe": true,
+      "support": {
+        "không": 796
+      }
+    },
+    {
+      "id": "vln-02",
+      "variants": [
+        "khum"
+      ],
+      "candidates": [
+        "không"
+      ],
+      "kind": "slang",
+      "source": "vilexnorm-train",
+      "retrieval_safe": true,
+      "support": {
+        "không": 93
+      }
+    },
+    {
+      "id": "vln-03",
+      "variants": [
+        "hok"
+      ],
+      "candidates": [
+        "không",
+        "hông"
+      ],
+      "kind": "slang",
+      "source": "vilexnorm-train",
+      "retrieval_safe": false,
+      "support": {
+        "không": 26,
+        "hông": 3
+      }
+    },
+    {
+      "id": "vln-04",
+      "variants": [
+        "dc"
+      ],
+      "candidates": [
+        "được"
+      ],
+      "kind": "slang",
+      "source": "vilexnorm-train",
+      "retrieval_safe": false,
+      "support": {
+        "được": 127
+      }
+    },
+    {
+      "id": "vln-05",
+      "variants": [
+        "đc"
+      ],
+      "candidates": [
+        "được"
+      ],
+      "kind": "slang",
+      "source": "vilexnorm-train",
+      "retrieval_safe": false,
+      "support": {
+        "được": 411
+      }
+    },
+    {
+      "id": "vln-06",
+      "variants": [
+        "dk"
+      ],
+      "candidates": [
+        "được"
+      ],
+      "kind": "slang",
+      "source": "vilexnorm-train",
+      "retrieval_safe": false,
+      "support": {
+        "được": 5
+      }
+    },
+    {
+      "id": "vln-07",
+      "variants": [
+        "cx"
+      ],
+      "candidates": [
+        "cũng"
+      ],
+      "kind": "slang",
+      "source": "vilexnorm-train",
+      "retrieval_safe": true,
+      "support": {
+        "cũng": 46
+      }
+    },
+    {
+      "id": "vln-08",
+      "variants": [
+        "mik"
+      ],
+      "candidates": [
+        "mình"
+      ],
+      "kind": "slang",
+      "source": "vilexnorm-train",
+      "retrieval_safe": true,
+      "support": {
+        "mình": 18
+      }
+    },
+    {
+      "id": "vln-09",
+      "variants": [
+        "mk"
+      ],
+      "candidates": [
+        "mình"
+      ],
+      "kind": "slang",
+      "source": "vilexnorm-train",
+      "retrieval_safe": false,
+      "support": {
+        "mình": 43
+      }
+    },
+    {
+      "id": "vln-10",
+      "variants": [
+        "mn"
+      ],
+      "candidates": [
+        "mọi người"
+      ],
+      "kind": "slang",
+      "source": "vilexnorm-train",
+      "retrieval_safe": true,
+      "support": {
+        "mọi người": 70
+      }
+    },
+    {
+      "id": "vln-11",
+      "variants": [
+        "bt"
+      ],
+      "candidates": [
+        "biết",
+        "bình thường",
+        "bài tập"
+      ],
+      "kind": "slang",
+      "source": "vilexnorm-train",
+      "retrieval_safe": false,
+      "support": {
+        "biết": 15,
+        "bình thường": 10,
+        "bài tập": 1
+      }
+    },
+    {
+      "id": "vln-12",
+      "variants": [
+        "bth"
+      ],
+      "candidates": [
+        "bình thường"
+      ],
+      "kind": "slang",
+      "source": "vilexnorm-train",
+      "retrieval_safe": true,
+      "support": {
+        "bình thường": 22
+      }
+    },
+    {
+      "id": "vln-13",
+      "variants": [
+        "vs"
+      ],
+      "candidates": [
+        "với"
+      ],
+      "kind": "slang",
+      "source": "vilexnorm-train",
+      "retrieval_safe": false,
+      "support": {
+        "với": 124
+      }
+    },
+    {
+      "id": "vln-14",
+      "variants": [
+        "ròi"
+      ],
+      "candidates": [
+        "rồi"
+      ],
+      "kind": "slang",
+      "source": "vilexnorm-train",
+      "retrieval_safe": true,
+      "support": {
+        "rồi": 19
+      }
+    },
+    {
+      "id": "vln-15",
+      "variants": [
+        "rùi"
+      ],
+      "candidates": [
+        "rồi",
+        "ruồi"
+      ],
+      "kind": "slang",
+      "source": "vilexnorm-train",
+      "retrieval_safe": false,
+      "support": {
+        "rồi": 31,
+        "ruồi": 1
+      }
+    },
+    {
+      "id": "vln-16",
+      "variants": [
+        "zậy"
+      ],
+      "candidates": [
+        "vậy"
+      ],
+      "kind": "slang",
+      "source": "vilexnorm-train",
+      "retrieval_safe": true,
+      "support": {
+        "vậy": 26
+      }
+    },
+    {
+      "id": "vln-17",
+      "variants": [
+        "zay"
+      ],
+      "candidates": [
+        "vậy"
+      ],
+      "kind": "slang",
+      "source": "vilexnorm-train",
+      "retrieval_safe": true,
+      "support": {
+        "vậy": 5
+      }
+    },
+    {
+      "id": "vln-18",
+      "variants": [
+        "zui"
+      ],
+      "candidates": [
+        "vui"
+      ],
+      "kind": "slang",
+      "source": "vilexnorm-train",
+      "retrieval_safe": true,
+      "support": {
+        "vui": 24
+      }
+    },
+    {
+      "id": "vln-19",
+      "variants": [
+        "lun"
+      ],
+      "candidates": [
+        "luôn"
+      ],
+      "kind": "slang",
+      "source": "vilexnorm-train",
+      "retrieval_safe": true,
+      "support": {
+        "luôn": 87
+      }
+    },
+    {
+      "id": "vln-20",
+      "variants": [
+        "iu"
+      ],
+      "candidates": [
+        "yêu"
+      ],
+      "kind": "slang",
+      "source": "vilexnorm-train",
+      "retrieval_safe": true,
+      "support": {
+        "yêu": 103
+      }
+    },
+    {
+      "id": "vln-21",
+      "variants": [
+        "ny"
+      ],
+      "candidates": [
+        "người yêu"
+      ],
+      "kind": "slang",
+      "source": "vilexnorm-train",
+      "retrieval_safe": false,
+      "support": {
+        "người yêu": 132
+      }
+    },
+    {
+      "id": "vln-22",
+      "variants": [
+        "thik"
+      ],
+      "candidates": [
+        "thích"
+      ],
+      "kind": "slang",
+      "source": "vilexnorm-train",
+      "retrieval_safe": true,
+      "support": {
+        "thích": 4
+      }
+    },
+    {
+      "id": "vln-23",
+      "variants": [
+        "ngta"
+      ],
+      "candidates": [
+        "người ta"
+      ],
+      "kind": "slang",
+      "source": "vilexnorm-train",
+      "retrieval_safe": true,
+      "support": {
+        "người ta": 145
+      }
+    },
+    {
+      "id": "user-dr-do",
+      "variants": [
+        "dr do",
+        "đúng rồi đó",
+        "dung roi do"
+      ],
+      "candidates": [
+        "đúng rồi đó"
+      ],
+      "kind": "acknowledgement",
+      "source": "user-request",
+      "retrieval_safe": false
+    },
+    {
+      "id": "project-acp",
+      "variants": [
+        "acp"
+      ],
+      "candidates": [
+        "chấp nhận",
+        "duyệt"
+      ],
+      "kind": "abbreviation",
+      "source": "project-examples",
+      "retrieval_safe": false
+    },
+    {
+      "id": "telex-01",
+      "variants": [
+        "ddawng nhaapj",
+        "dawng nhaapj"
+      ],
+      "candidates": [
+        "đăng nhập"
+      ],
+      "kind": "telex",
+      "source": "project-examples",
+      "retrieval_safe": true
+    },
+    {
+      "id": "telex-02",
+      "variants": [
+        "thaays"
+      ],
+      "candidates": [
+        "thấy"
+      ],
+      "kind": "telex",
+      "source": "project-examples",
+      "retrieval_safe": true
+    },
+    {
+      "id": "telex-03",
+      "variants": [
+        "nayf"
+      ],
+      "candidates": [
+        "này"
+      ],
+      "kind": "telex",
+      "source": "project-examples",
+      "retrieval_safe": true
+    },
+    {
+      "id": "telex-04",
+      "variants": [
+        "tooi",
+        "toi"
+      ],
+      "candidates": [
+        "tôi"
+      ],
+      "kind": "telex",
+      "source": "project-examples",
+      "retrieval_safe": true
+    },
+    {
+      "id": "telex-05",
+      "variants": [
+        "oonr"
+      ],
+      "candidates": [
+        "ổn"
+      ],
+      "kind": "telex",
+      "source": "project-examples",
+      "retrieval_safe": true
+    },
+    {
+      "id": "telex-06",
+      "variants": [
+        "caau"
+      ],
+      "candidates": [
+        "câu"
+      ],
+      "kind": "telex",
+      "source": "project-examples",
+      "retrieval_safe": true
+    },
+    {
+      "id": "telex-07",
+      "variants": [
+        "rooif"
+      ],
+      "candidates": [
+        "rồi"
+      ],
+      "kind": "telex",
+      "source": "project-examples",
+      "retrieval_safe": true
+    },
+    {
+      "id": "telex-08",
+      "variants": [
+        "dduowcj"
+      ],
+      "candidates": [
+        "được"
+      ],
+      "kind": "telex",
+      "source": "project-examples",
+      "retrieval_safe": true
+    }
+  ]
+}

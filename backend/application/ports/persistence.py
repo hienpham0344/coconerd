@@ -25,6 +25,9 @@ from backend.domain.enums import ActionType
 
 
 class MessagesRepository(Protocol):
+    async def evidence_for_topic(
+        self, guild_id: str, channel_id: str, topic_id: str, before: datetime, limit: int = 2
+    ) -> Sequence[MessageReadModel]: ...
     async def ingest(
         self, message: ConversationMessage, max_attempts: int
     ) -> tuple[MessageReadModel, bool]: ...
@@ -59,6 +62,9 @@ class MessagesRepository(Protocol):
 
 
 class TopicsRepository(Protocol):
+    async def search(
+        self, guild_id: str, query: str, limit: int = 30
+    ) -> Sequence[TopicReadModel]: ...
     async def inactive(self, cutoff: datetime) -> Sequence[TopicReadModel]: ...
     async def close_latest_episode(
         self, guild_id: str, topic_id: str, ended_at: datetime
@@ -122,6 +128,9 @@ class ModelConfigRepository(Protocol):
 
 
 class JobsRepository(Protocol):
+    async def reserve_model_call(self, job_id: str, owner: str) -> bool: ...
+    async def wait_for_context(self, job_id: str, until: datetime) -> bool: ...
+    async def wake_deferred(self, followup_message_id: str) -> None: ...
     async def claim_available(
         self, owner: str, now: datetime, lease_expires_at: datetime
     ) -> ClaimedJob | None: ...

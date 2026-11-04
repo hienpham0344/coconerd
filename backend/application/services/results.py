@@ -14,3 +14,4 @@ class ProcessingResult:
     outcome: str
     topic_id: str | None
     candidate_topic_ids: list[str]
+    defer_reason: str | None = None

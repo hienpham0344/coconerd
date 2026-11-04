@@ -67,6 +67,8 @@ class JobReadModel:
 class ClaimedJob(JobReadModel):
     """Processing job lease returned after the repository claims a row."""
 
+    followup_message_id: str | None = None
+
 
 @dataclass(frozen=True, slots=True)
 class SummaryReadModel:
@@ -123,6 +125,7 @@ class JobState:
     id: str
     attempt_count: int
     max_attempts: int
+    model_call_count: int = 0
 
 
 @dataclass(frozen=True, slots=True)

@@ -79,6 +79,18 @@ class TopicRecord(Base):
     version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
 
 
+class TopicSearchTermRecord(Base):
+    __tablename__ = "topic_search_terms"
+    __table_args__ = (Index("ix_topic_terms_guild_term", "guild_id", "term"),)
+
+    topic_id: Mapped[str] = mapped_column(
+        ForeignKey("topics.id", ondelete="CASCADE"), primary_key=True
+    )
+    term: Mapped[str] = mapped_column(String(300), primary_key=True)
+    guild_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    weight: Mapped[float] = mapped_column(Float, nullable=False)
+
+
 class EpisodeRecord(Base):
     __tablename__ = "conversation_episodes"
     __table_args__ = (
@@ -197,6 +209,14 @@ class ProcessingJobRecord(Base):
     status: Mapped[str] = mapped_column(String(20), default="PENDING", nullable=False)
     attempt_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     max_attempts: Mapped[int] = mapped_column(Integer, default=5, nullable=False)
+    model_call_count: Mapped[int] = mapped_column(
+        Integer, default=0, server_default="0", nullable=False
+    )
+    reassessment_count: Mapped[int] = mapped_column(
+        Integer, default=0, server_default="0", nullable=False
+    )
+    followup_message_id: Mapped[str | None] = mapped_column(String(36))
+    deferred_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     lease_owner: Mapped[str | None] = mapped_column(String(100))
     lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     available_at: Mapped[datetime] = mapped_column(
