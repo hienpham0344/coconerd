@@ -167,6 +167,7 @@ class MessageRepository:
                     "kind": kind,
                     "confidence": confidence,
                     "reason": reason,
+                    "revision": MessageTopicAssociationRecord.revision + 1,
                 },
                 where=MessageTopicAssociationRecord.kind == "DEFERRED",
             )

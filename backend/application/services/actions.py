@@ -26,8 +26,12 @@ async def _get_action(uow: UnitOfWork, action_id: str) -> ActionState:
     return action
 
 
-def _require_lease(action: ActionState, worker_id: str) -> None:
-    if action.status != "CLAIMED" or action.lease_owner != worker_id:
+def _require_lease(action: ActionState, worker_id: str, lease_token: str | None) -> None:
+    if (
+        action.status != "CLAIMED"
+        or action.lease_owner != worker_id
+        or action.lease_token != lease_token
+    ):
         raise Conflict("Action is not leased by this worker")
 
 
@@ -37,6 +41,8 @@ async def complete_action(
     worker_id: str,
     discord_thread_id: str | None,
     discord_message_id: str | None,
+    *,
+    lease_token: str | None = None,
 ) -> ActionResult:
     action = await _get_action(uow, action_id)
     if action.status == "SUCCEEDED":
@@ -46,17 +52,17 @@ async def complete_action(
         ):
             return ActionResult(action.id, action.status)
         raise Conflict("Action was already completed with another result")
-    _require_lease(action, worker_id)
+    _require_lease(action, worker_id, lease_token)
     if action.action_type == "CREATE_THREAD" and not discord_thread_id:
         raise InvalidTransition("CREATE_THREAD completion requires discord_thread_id")
     if discord_thread_id:
         topic = await uow.topics.get(action.guild_id, action.topic_id)
         if topic is None or topic.guild_id != action.guild_id:
             raise Conflict("Action topic is inconsistent")
-        if action.action_type == "CREATE_THREAD":
-            await uow.topics.set_thread(action.guild_id, action.topic_id, discord_thread_id)
-    await uow.actions.update(
+    changed = await uow.actions.update_leased(
         action.id,
+        worker_id,
+        lease_token=lease_token,
         status="SUCCEEDED",
         completed_at=datetime.now(UTC),
         lease_owner=None,
@@ -64,6 +70,10 @@ async def complete_action(
         discord_thread_id=discord_thread_id,
         discord_message_id=discord_message_id,
     )
+    if not changed:
+        raise Conflict("Action lease was lost")
+    if action.action_type == "CREATE_THREAD":
+        await uow.topics.set_thread(action.guild_id, action.topic_id, discord_thread_id)
     await uow.commit()
     return ActionResult(action.id, "SUCCEEDED")
 
@@ -75,9 +85,11 @@ async def fail_action(
     error_type: str,
     error_message: str,
     retryable: bool,
+    *,
+    lease_token: str | None = None,
 ) -> ActionResult:
     action = await _get_action(uow, action_id)
-    _require_lease(action, worker_id)
+    _require_lease(action, worker_id, lease_token)
     status = "PENDING" if retryable and action.attempt_count < action.max_attempts else "DEAD"
     changes: dict[str, object] = dict(
         error_type=error_type,
@@ -90,6 +102,9 @@ async def fail_action(
         changes["available_at"] = datetime.now(UTC) + timedelta(
             seconds=min(300, 2**action.attempt_count)
         )
-    await uow.actions.update(action.id, **changes)
+    if not await uow.actions.update_leased(
+        action.id, worker_id, lease_token=lease_token, **changes
+    ):
+        raise Conflict("Action lease was lost")
     await uow.commit()
     return ActionResult(action.id, status)

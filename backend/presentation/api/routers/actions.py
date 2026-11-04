@@ -40,6 +40,7 @@ def create_router(dependencies: ApiDependencies) -> APIRouter:
                 channel_id=action.channel_id,
                 payload=action.payload,
                 status=action.status,
+                lease_token=action.lease_token,
             )
             for action in claimed
         ]
@@ -60,6 +61,7 @@ def create_router(dependencies: ApiDependencies) -> APIRouter:
             body.worker_id,
             body.discord_thread_id,
             body.discord_message_id,
+            lease_token=body.lease_token,
         )
         return asdict(result)
 
@@ -80,6 +82,7 @@ def create_router(dependencies: ApiDependencies) -> APIRouter:
             body.error_type,
             body.error_message,
             body.retryable,
+            lease_token=body.lease_token,
         )
         return asdict(result)
 

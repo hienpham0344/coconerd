@@ -4,6 +4,7 @@ from collections.abc import Sequence
 from datetime import datetime
 from typing import Protocol
 
+from backend.application.ports.reviews import ReviewsRepository
 from backend.application.read_models import (
     ActionReadModel,
     ActionState,
@@ -86,8 +87,12 @@ class TopicsRepository(Protocol):
 
 
 class ActionsRepository(Protocol):
-    async def get(self, action_id: str) -> ActionState | None: ...
     async def update(self, action_id: str, **changes: object) -> None: ...
+
+    async def get(self, action_id: str) -> ActionState | None: ...
+    async def update_leased(
+        self, action_id: str, owner: str, *, lease_token: str | None = None, **changes: object
+    ) -> bool: ...
 
     async def pending_create(self, guild_id: str, topic_id: str) -> ActionReadModel | None: ...
     async def add(
@@ -129,20 +134,23 @@ class ModelConfigRepository(Protocol):
 
 class JobsRepository(Protocol):
     async def reserve_model_call(self, job_id: str, owner: str) -> bool: ...
-    async def wait_for_context(self, job_id: str, until: datetime) -> bool: ...
+    async def wait_for_context(self, job_id: str, until: datetime, *, owner: str) -> bool: ...
     async def wake_deferred(self, followup_message_id: str) -> None: ...
     async def claim_available(
         self, owner: str, now: datetime, lease_expires_at: datetime
     ) -> ClaimedJob | None: ...
     async def get_state(self, job_id: str) -> JobState | None: ...
     async def record_failure(
-        self, job_id: str, status: str, available_at: datetime, error_type: str
+        self, job_id: str, status: str, available_at: datetime, error_type: str, *, owner: str
     ) -> None: ...
     async def claim_one(self, owner: str, lease_seconds: int) -> ClaimedJob | None: ...
-    async def complete(self, job_id: str) -> None: ...
+    async def complete(self, job_id: str, *, owner: str) -> None: ...
 
 
 class SummariesRepository(Protocol):
+    async def latest_many(
+        self, guild_id: str, topic_ids: Sequence[str]
+    ) -> dict[str, SummaryReadModel]: ...
     async def latest(self, guild_id: str, topic_id: str) -> SummaryReadModel | None: ...
     async def add(
         self,
@@ -169,6 +177,7 @@ class RetentionRepository(Protocol):
 
 
 class UnitOfWork(Protocol):
+    reviews: ReviewsRepository
     messages: MessagesRepository
     topics: TopicsRepository
     actions: ActionsRepository

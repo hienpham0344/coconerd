@@ -37,6 +37,7 @@ class TopicReadModel:
     last_activity_at: datetime
     version: int
     discord_thread_id: str | None
+    sync_paused: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,6 +55,8 @@ class ActionReadModel:
 @dataclass(frozen=True, slots=True)
 class ClaimedAction(ActionReadModel):
     """Action lease returned after the repository claims a row."""
+
+    lease_token: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,6 +90,7 @@ class ActionState(ActionReadModel):
     max_attempts: int
     discord_thread_id: str | None
     discord_message_id: str | None
+    lease_token: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

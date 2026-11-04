@@ -6,15 +6,19 @@ from collections.abc import Sequence
 from backend.application.contracts import ClassificationResult, TopicCandidate, TopicDecision
 from backend.application.language_normalization import analyze_language
 from backend.application.read_models import ContextMessage
+from backend.application.topic_memory import InvalidMemoryUpdate, validate_memory_replacements
 from backend.domain.entities import ConversationMessage
 
-POLICY_VERSION = "topic-policy-v3"
+POLICY_VERSION = "topic-policy-v4"
+# A conservative abstention rule, not a calibrated probability of correctness.
+ASSIGNMENT_CONFIDENCE_FLOOR = 0.7
 POLICY_INSTRUCTIONS = (
     "Topic identity follows the same issue/project and goal, not shared keywords. "
     "Distinguish web/mobile and unrelated projects. A reply may change subject. "
     "Use defer with missing_context for an unclear acknowledgement or reference; "
     "irrelevant is only clearly non-topical content, not uncertainty. "
     "Set multiple_topics=true and defer when the target contains separate topics. "
+    "Choose defer with ambiguous when your confidence in an assignment is below 0.7. "
     "For new/existing, evidence_message_ids must include the target message_id and "
     "only supplied message IDs supporting the decision. Existing topic_id must be "
     "in candidate_topics. Do not invent evidence. When deferring, set defer_reason "
@@ -23,7 +27,12 @@ POLICY_INSTRUCTIONS = (
     "claims must not be attributed to the original message. Summary updates must "
     "contain only facts contributed by the target. Examples: 'ok' without a clear "
     "referent -> defer; 'ok' replying to 'ship beta Thursday?' -> existing beta; "
-    "'ship beta Thursday, and who fixes payments?' -> defer with multiple_topics."
+    "'ship beta Thursday, and who fixes payments?' -> defer with multiple_topics. "
+    "For an explicit correction or cancellation, use memory_replacements: field, "
+    "previous (one exact complete fact/overview line shown in the selected topic), "
+    "replacement (new fact, or null to remove), quote (exact supporting target text). "
+    "Keep unmentioned facts; never replace from context alone or edit truncated facts. "
+    "Do not repeat superseded facts in summary or extracted lists. Return [] otherwise."
 )
 _ACKS = {"ok", "okay", "yes", "no", "agreed", "ừ", "ừm", "uh", "đồng ý", "không", "chốt nhé"}
 
@@ -83,6 +92,8 @@ def validate_classification(
             item.id for item in candidates
         }:
             reason = "invalid_topic"
+        elif decision.confidence < ASSIGNMENT_CONFIDENCE_FLOOR:
+            reason = "ambiguous"
         elif decision.outcome == "new" and bare_reference:
             reason = "missing_context"
         elif decision.outcome == "new":
@@ -99,6 +110,14 @@ def validate_classification(
                 for item in candidates
             ):
                 reason = "duplicate_topic"
+    if not reason and decision.outcome in {"new", "existing"}:
+        selected = next((item for item in candidates if item.id == decision.topic_id), None)
+        try:
+            validate_memory_replacements(
+                selected.summary if selected else {}, decision, message.content
+            )
+        except InvalidMemoryUpdate:
+            reason = "invalid_evidence"
     if reason:
         decision = TopicDecision(
             outcome="defer",
@@ -110,6 +129,7 @@ def validate_classification(
     elif decision.outcome in {"defer", "irrelevant"}:
         decision.topic_id = decision.title = None
         decision.summary = decision.description = ""
+        decision.memory_replacements = []
         decision.proposals = decision.decisions = decision.open_questions = (
             decision.action_items
         ) = []
@@ -121,6 +141,7 @@ def validate_classification(
             # A resolved reference may identify a topic without asserting new facts.
             # Keep the source message, but do not infer approvals or tasks from it.
             decision.description = decision.summary = ""
+            decision.memory_replacements = []
             decision.proposals = decision.decisions = decision.open_questions = (
                 decision.action_items
             ) = []

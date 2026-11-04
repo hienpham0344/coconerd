@@ -19,6 +19,7 @@ from backend.infrastructure.database.models import (
     MessageRecord,
     MessageTopicAssociationRecord,
     ProcessingJobRecord,
+    ReviewEventRecord,
     TopicSummaryRecord,
 )
 
@@ -72,6 +73,11 @@ class RetentionRepository:
         )
 
     async def delete_messages(self, record_ids: list[str]) -> None:
-        for model in (ProcessingJobRecord, AIDecisionRecord, MessageTopicAssociationRecord):
+        for model in (
+            ReviewEventRecord,
+            ProcessingJobRecord,
+            AIDecisionRecord,
+            MessageTopicAssociationRecord,
+        ):
             await self.session.execute(delete(model).where(model.message_record_id.in_(record_ids)))
         await self.session.execute(delete(MessageRecord).where(MessageRecord.id.in_(record_ids)))

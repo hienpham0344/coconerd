@@ -28,6 +28,7 @@ def sql(statement):
         (
             "guild",
             [
+                "review_events",
                 "processing_jobs",
                 "discord_actions",
                 "topic_summaries",
@@ -44,6 +45,7 @@ def sql(statement):
         (
             "topic",
             [
+                "review_events",
                 "discord_actions",
                 "processing_jobs",
                 "ai_decisions",
@@ -168,7 +170,14 @@ async def test_action_claim_uses_service_clock_and_keeps_dependency_budget_and_e
     assert "discord_actions.dependency_id IS NULL" in compiled
     assert "discord_actions.status = 'SUCCEEDED'" in compiled
     assert "LIMIT 7" in compiled
-    session.execute.assert_not_awaited()
+    cleanup = [sql(call.args[0]) for call in session.execute.call_args_list]
+    assert len(cleanup) == 2
+    assert "LeaseAttemptsExhausted" in cleanup[0]
+    assert "lease_expires_at <=" in cleanup[0]
+    assert "DependencyFailed" in cleanup[1]
+    assert "discord_actions.status = 'DEAD'" in cleanup[1]
+    assert "topics.sync_paused IS false" in compiled
+    assert "discord_actions.superseded IS false" in compiled
 
 
 async def test_health_filters_live_worker_status_and_cutoff():

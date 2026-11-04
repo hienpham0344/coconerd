@@ -9,6 +9,7 @@ class TopicStatus(StrEnum):
 
 
 class AssociationKind(StrEnum):
+    MANUAL = "MANUAL"
     CLASSIFIED = "CLASSIFIED"
     REPLY_LINK = "REPLY_LINK"
     DEFERRED = "DEFERRED"
@@ -23,6 +24,7 @@ class ActionType(StrEnum):
 
 
 class ActionStatus(StrEnum):
+    CANCELLED = "CANCELLED"
     PENDING = "PENDING"
     CLAIMED = "CLAIMED"
     SUCCEEDED = "SUCCEEDED"

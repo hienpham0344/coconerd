@@ -107,6 +107,7 @@ async def test_claim_respects_thread_dependency_and_ack_is_idempotent(api_client
     completion = {
         "worker_id": "bot-worker",
         "discord_thread_id": "thread-1",
+        "lease_token": claimed.json()[0]["lease_token"],
     }
     completed = await api_client.post(
         "/api/v1/actions/create-1/complete", json=completion, headers=headers

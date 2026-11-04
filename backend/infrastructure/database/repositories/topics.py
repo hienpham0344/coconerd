@@ -15,6 +15,7 @@ from backend.infrastructure.database.models import (
     MessageRecord,
     MessageTopicAssociationRecord,
     ProcessingJobRecord,
+    ReviewEventRecord,
     TopicRecord,
     TopicSearchTermRecord,
     TopicSummaryRecord,
@@ -180,6 +181,13 @@ class TopicRepository:
             MessageTopicAssociationRecord.topic_id == topic_id,
         )
         await self.session.execute(
+            delete(ReviewEventRecord).where(
+                ReviewEventRecord.guild_id == guild_id,
+                (ReviewEventRecord.topic_id == topic_id)
+                | ReviewEventRecord.message_record_id.in_(message_record_ids),
+            )
+        )
+        await self.session.execute(
             delete(DiscordActionRecord).where(
                 DiscordActionRecord.guild_id == guild_id, DiscordActionRecord.topic_id == topic_id
             )
@@ -234,4 +242,5 @@ def _topic_read_model(record: TopicRecord) -> TopicReadModel:
         last_activity_at=record.last_activity_at,
         version=record.version if record.version is not None else 1,
         discord_thread_id=record.discord_thread_id,
+        sync_paused=record.sync_paused,
     )

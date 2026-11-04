@@ -72,6 +72,7 @@ async def test_completion_failure_rolls_back_staged_classification(monkeypatch):
             status=topic.status.value,
             version=1,
             discord_thread_id=None,
+            sync_paused=False,
         )
 
     async def stage_episode(*_args):
@@ -94,7 +95,7 @@ async def test_completion_failure_rolls_back_staged_classification(monkeypatch):
         staged.append("summary")
         return SimpleNamespace(id="summary-1", version=1)
 
-    async def fail_completion(_job_id):
+    async def fail_completion(_job_id, *, owner):
         stage_at_failure.extend(staged)
         raise LookupError("Claimed processing job disappeared")
 

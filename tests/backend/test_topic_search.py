@@ -10,6 +10,41 @@ from backend.infrastructure.database.repositories.summaries import SummaryReposi
 from backend.infrastructure.database.repositories.topics import TopicRepository
 
 
+async def test_latest_summaries_are_batched_and_guild_scoped(database_factory):
+    from sqlalchemy import event
+
+    from backend.infrastructure.database.unit_of_work import SqlAlchemyUnitOfWork
+
+    async with database_factory() as session:
+        topics, summaries = TopicRepository(session), SummaryRepository(session)
+        first = await topics.create(ConversationTopic.create("g", "Atlas"))
+        second = await topics.create(ConversationTopic.create("g", "Boreal"))
+        foreign = await topics.create(ConversationTopic.create("other", "Private"))
+        for topic in (first, second, foreign):
+            for version in (1, 2):
+                await summaries.add(
+                    topic.guild_id, topic.id, version, {"overview": str(version)}, []
+                )
+        await session.commit()
+        reads = []
+
+        def capture(_connection, _cursor, statement, _parameters, _context, _many):
+            if statement.lstrip().upper().startswith("SELECT"):
+                reads.append(statement)
+
+        engine = database_factory.kw["bind"].sync_engine
+        event.listen(engine, "before_cursor_execute", capture)
+        try:
+            rows = await SqlAlchemyUnitOfWork(session).summaries.latest_many(
+                "g", [first.id, second.id, foreign.id, "missing"]
+            )
+        finally:
+            event.remove(engine, "before_cursor_execute", capture)
+        assert set(rows) == {first.id, second.id}
+        assert {row.version for row in rows.values()} == {2}
+        assert len(reads) == 1
+
+
 async def test_search_finds_old_topic_and_normalizes_accents_aliases(database_factory):
     async with database_factory() as session:
         topics = TopicRepository(session)

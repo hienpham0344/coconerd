@@ -69,6 +69,9 @@ class TopicRecord(Base):
     title: Mapped[str] = mapped_column(String(300), nullable=False)
     description: Mapped[str] = mapped_column(Text, default="", nullable=False)
     status: Mapped[str] = mapped_column(String(20), default="ACTIVE", nullable=False)
+    sync_paused: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="0", nullable=False
+    )
     discord_thread_id: Mapped[str | None] = mapped_column(String(100), unique=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, nullable=False
@@ -121,6 +124,7 @@ class MessageTopicAssociationRecord(Base):
         ForeignKey("messages.id", ondelete="CASCADE"), nullable=False
     )
     topic_id: Mapped[str | None] = mapped_column(ForeignKey("topics.id", ondelete="CASCADE"))
+    revision: Mapped[int] = mapped_column(Integer, default=1, server_default="1", nullable=False)
     kind: Mapped[str] = mapped_column(String(30), nullable=False)
     confidence: Mapped[float] = mapped_column(Float, nullable=False)
     reason: Mapped[str] = mapped_column(Text, default="", nullable=False)
@@ -177,6 +181,10 @@ class DiscordActionRecord(Base):
     action_type: Mapped[str] = mapped_column(String(40), nullable=False)
     status: Mapped[str] = mapped_column(String(20), default="PENDING", nullable=False)
     payload: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    lease_token: Mapped[str | None] = mapped_column(String(36))
+    superseded: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="0", nullable=False
+    )
     dependency_id: Mapped[str | None] = mapped_column(
         ForeignKey("discord_actions.id", ondelete="CASCADE")
     )
@@ -272,3 +280,25 @@ class ApiRateLimitRecord(Base):
     client_fingerprint: Mapped[str] = mapped_column(String(64), primary_key=True)
     window_start: Mapped[datetime] = mapped_column(DateTime(timezone=True), primary_key=True)
     request_count: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
+class ReviewEventRecord(Base):
+    __tablename__ = "review_events"
+    __table_args__ = (UniqueConstraint("guild_id", "request_id", name="uq_review_guild_request"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    guild_id: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    request_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    operation: Mapped[str] = mapped_column(String(40), nullable=False)
+    resource_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    actor: Mapped[str] = mapped_column(String(100), nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    result: Mapped[dict] = mapped_column(JSON, nullable=False)
+    message_record_id: Mapped[str | None] = mapped_column(
+        ForeignKey("messages.id", ondelete="CASCADE")
+    )
+    topic_id: Mapped[str | None] = mapped_column(ForeignKey("topics.id", ondelete="CASCADE"))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False
+    )

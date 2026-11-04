@@ -36,11 +36,11 @@ def _compact(candidate: TopicCandidate) -> TopicCandidate:
     compact_summary: dict[str, object] = {}
     overview = summary.get("overview")
     if isinstance(overview, str):
-        compact_summary["overview"] = overview[:400]
+        compact_summary["overview"] = overview[-400:]
     for key in _SUMMARY_LISTS:
         values = summary.get(key)
         if isinstance(values, list):
-            compact_summary[key] = [value[:120] for value in values[:3] if isinstance(value, str)]
+            compact_summary[key] = [value[:120] for value in values[-3:] if isinstance(value, str)]
     return candidate.model_copy(
         update={
             "title": candidate.title[:120],

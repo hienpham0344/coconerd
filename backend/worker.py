@@ -77,7 +77,7 @@ class ConversationWorker:
                     provider,
                     followup_message_id=job.followup_message_id,
                 )
-                await complete_job(unit_of_work, job_id, result)
+                await complete_job(unit_of_work, job_id, result, owner=self.worker_id)
             await self._heartbeat("idle")
         except Exception as exc:
             logger.exception(
@@ -100,7 +100,13 @@ class ConversationWorker:
 
     async def _fail_job(self, job_id: str, error_type: str, *, retryable: bool = True) -> None:
         async with self.session_factory() as session:
-            await fail_job(SqlAlchemyUnitOfWork(session), job_id, error_type, retryable=retryable)
+            await fail_job(
+                SqlAlchemyUnitOfWork(session),
+                job_id,
+                error_type,
+                owner=self.worker_id,
+                retryable=retryable,
+            )
 
     async def _reserve_model_call(self, job_id: str) -> bool:
         async with self.session_factory() as session:
