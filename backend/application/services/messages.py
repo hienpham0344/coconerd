@@ -22,6 +22,7 @@ def _classification_payload(
         "model_id": result.model_id,
         "candidate_topic_ids": result.candidate_topic_ids,
         "context_message_ids": context_message_ids or [],
+        "language_hints": result.language_hints,
         "usage": {
             "prompt_tokens": result.prompt_tokens,
             "completion_tokens": result.completion_tokens,

@@ -3,6 +3,8 @@
 import re
 import unicodedata
 
+from backend.application.language_normalization import analyze_language
+
 _STOPWORDS = set(
     [
         "a",
@@ -42,7 +44,9 @@ def normalize_text(value: str) -> str:
 
 
 def search_terms(value: str, limit: int = 24) -> list[str]:
-    normalized = normalize_text(value[:10000])
+    original = value[:8000]
+    suggested = analyze_language(original).retrieval_text
+    normalized = normalize_text(f"{suggested} {original}")
     normalized = normalized.replace("co so du lieu", "database").replace("dang nhap", "login")
     return list(
         dict.fromkeys(

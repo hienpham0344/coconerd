@@ -4,6 +4,7 @@ import re
 from collections.abc import Sequence
 
 from backend.application.contracts import ClassificationResult, TopicCandidate, TopicDecision
+from backend.application.language_normalization import analyze_language
 from backend.application.read_models import ContextMessage
 from backend.domain.entities import ConversationMessage
 
@@ -36,7 +37,7 @@ def classify_locally(
             outcome="irrelevant", confidence=1, reason="message has no text content"
         )
         model_id = "local-empty"
-    elif normalized in _ACKS and not any(
+    elif (normalized in _ACKS or analyze_language(message.content).needs_context) and not any(
         item.relation in {"reply_ancestor", "followup_clarification"} for item in context
     ):
         decision = TopicDecision(
@@ -69,6 +70,7 @@ def validate_classification(
     decision = result.decision.model_copy(deep=True)
     reason = None
     known_ids = {message.message_id, *(item.message_id for item in context)}
+    bare_reference = analyze_language(message.content).needs_context
     if decision.multiple_topics:
         reason = "multiple_topics"
     elif decision.outcome in {"new", "existing"}:
@@ -81,6 +83,8 @@ def validate_classification(
             item.id for item in candidates
         }:
             reason = "invalid_topic"
+        elif decision.outcome == "new" and bare_reference:
+            reason = "missing_context"
         elif decision.outcome == "new":
             if (
                 not decision.title
@@ -113,4 +117,11 @@ def validate_classification(
             decision.defer_reason = "ambiguous"
     else:
         decision.defer_reason = None
+        if bare_reference:
+            # A resolved reference may identify a topic without asserting new facts.
+            # Keep the source message, but do not infer approvals or tasks from it.
+            decision.description = decision.summary = ""
+            decision.proposals = decision.decisions = decision.open_questions = (
+                decision.action_items
+            ) = []
     return result.model_copy(update={"decision": decision, "policy_version": POLICY_VERSION})

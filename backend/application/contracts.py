@@ -55,6 +55,7 @@ class ClassificationResult(BaseModel):
     latency_ms: int
     policy_version: str = "topic-policy-v3"
     model_calls: int = 1
+    language_hints: dict[str, object] = Field(default_factory=dict)
 
 
 class ModelProvider(Protocol):

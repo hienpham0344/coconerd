@@ -9,6 +9,7 @@ from backend.application.contracts import (
     TopicDecision,
 )
 from backend.application.decision_policy import classify_locally, validate_classification
+from backend.application.language_normalization import analyze_language
 from backend.application.read_models import ContextMessage
 from backend.application.topic_retriever import retrieval_message, retrieve_topic_candidates
 from backend.domain.entities import ConversationMessage
@@ -42,6 +43,7 @@ def create_topic_workflow(provider: ModelProvider):
             classification, state["message"], state["retrieved_candidates"], state["context"]
         )
         classification.candidate_topic_ids = [item.id for item in state["retrieved_candidates"]]
+        classification.language_hints = analyze_language(state["message"].content).as_payload()
         return {"classification": classification, "decision": classification.decision}
 
     def outcome(state: WorkflowState) -> str:
