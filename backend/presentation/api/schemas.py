@@ -27,6 +27,15 @@ class MessageIngestResponse(BaseModel):
     status: str = "accepted"
 
 
+class MessageBatchIngestRequest(BaseModel):
+    messages: list[MessageIngestRequest] = Field(max_length=50)
+
+
+class MessageBatchIngestResponse(BaseModel):
+    accepted: int
+    message_ids: list[str]
+
+
 class ActionClaimRequest(BaseModel):
     worker_id: str = Field(min_length=1, max_length=100)
     limit: int = Field(default=20, ge=1, le=100)
@@ -58,13 +67,14 @@ class ActionResponse(BaseModel):
 
 
 class GuildSettingsRequest(BaseModel):
-    enabled: bool
-    allowed_channel_ids: list[str] = Field(max_length=200)
+    enabled: bool = True
+    allowed_channel_ids: list[str] = Field(default_factory=list, max_length=200)
+    output_channel_id: str | None = None
     retention_days: int = Field(default=365, ge=1, le=3650)
 
 
 class ModelConfigRequest(BaseModel):
-    provider: Literal["meta"] = "meta"
+    provider: Literal["meta", "groq"] = "meta"
     model_id: str = Field(min_length=1, max_length=200)
     temperature: float = Field(default=0.0, ge=0.0, le=2.0)
     max_tokens: int = Field(default=2048, ge=1, le=32768)

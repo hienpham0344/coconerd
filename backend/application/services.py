@@ -77,7 +77,7 @@ async def process_message_record(
         reply_to_message_id=message_record.reply_to_message_id,
     )
     topics = TopicRepository(session)
-    candidates_records = await topics.candidates(message.guild_id)
+    candidates_records = await topics.candidates(message.guild_id, channel_id=message.channel_id)
     reply_topic_id: str | None = None
     if message.reply_to_message_id:
         reply_association = await session.scalar(
@@ -94,7 +94,11 @@ async def process_message_record(
         )
         if reply_association:
             reply_topic = await topics.get(message.guild_id, reply_association.topic_id)
-            if reply_topic and reply_topic.status != TopicStatus.CLOSED:
+            if (
+                reply_topic
+                and reply_topic.status != TopicStatus.CLOSED
+                and reply_topic.channel_id == message.channel_id
+            ):
                 reply_topic_id = reply_topic.id
                 if all(candidate.id != reply_topic.id for candidate in candidates_records):
                     candidates_records.insert(0, reply_topic)
@@ -123,30 +127,50 @@ async def process_message_record(
 
     topic: TopicRecord | None = None
     new_topic = False
-    if decision.outcome == "existing" and decision.topic_id:
-        topic = await topics.get(message.guild_id, decision.topic_id)
-        if topic is None or topic.status == TopicStatus.CLOSED:
+    if decision.outcome == "existing":
+        if not decision.topic_id:
             decision.outcome = "defer"
-            decision.reason = "provider selected a missing, closed, or cross-guild topic"
-        elif topic.status == TopicStatus.DORMANT:
-            lifecycle = ConversationTopic.create(topic.guild_id, topic.title)
-            lifecycle.status = TopicStatus(topic.status)
-            lifecycle.transition_to(TopicStatus.RESUMED)
-            topic.status = lifecycle.status.value
-            session.add(
-                EpisodeRecord(
-                    id=str(uuid4()),
-                    guild_id=message.guild_id,
-                    topic_id=topic.id,
-                    started_at=message.created_at,
+            decision.reason = "provider selected an existing topic outcome without a topic_id"
+            topic = None
+        else:
+            existing_candidate = await topics.get(message.guild_id, decision.topic_id)
+            if (
+                existing_candidate is None
+                or existing_candidate.guild_id != message.guild_id
+                or existing_candidate.channel_id != message.channel_id
+                or existing_candidate.status == TopicStatus.CLOSED
+            ):
+                decision.outcome = "defer"
+                decision.reason = (
+                    "provider selected a missing, closed, cross-guild, or cross-channel topic"
                 )
-            )
+                topic = None
+            elif existing_candidate.status == TopicStatus.DORMANT:
+                topic = existing_candidate
+                lifecycle = ConversationTopic.create(
+                    topic.guild_id, topic.title, channel_id=topic.channel_id
+                )
+                lifecycle.status = TopicStatus(topic.status)
+                lifecycle.transition_to(TopicStatus.RESUMED)
+                topic.status = lifecycle.status.value
+                session.add(
+                    EpisodeRecord(
+                        id=str(uuid4()),
+                        guild_id=message.guild_id,
+                        topic_id=topic.id,
+                        started_at=message.created_at,
+                    )
+                )
+            else:
+                topic = existing_candidate
     elif decision.outcome == "new":
         if not decision.title or not decision.title.strip():
             decision.outcome = "defer"
             decision.reason = "provider proposed a new topic without a title"
         else:
-            topic_entity = ConversationTopic.create(message.guild_id, decision.title)
+            topic_entity = ConversationTopic.create(
+                message.guild_id, decision.title, channel_id=message.channel_id
+            )
             topic_entity.description = decision.description
             topic_entity.last_activity_at = message.created_at
             topic = await topics.create(topic_entity)

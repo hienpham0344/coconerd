@@ -30,6 +30,7 @@ class GuildSettingsRecord(Base):
     guild_id: Mapped[str] = mapped_column(String(100), primary_key=True)
     enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     allowed_channel_ids: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    output_channel_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
     retention_days: Mapped[int] = mapped_column(Integer, default=365, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, nullable=False
@@ -66,6 +67,7 @@ class TopicRecord(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     guild_id: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    channel_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
     title: Mapped[str] = mapped_column(String(300), nullable=False)
     description: Mapped[str] = mapped_column(Text, default="", nullable=False)
     status: Mapped[str] = mapped_column(String(20), default="ACTIVE", nullable=False)

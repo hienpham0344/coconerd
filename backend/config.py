@@ -40,6 +40,22 @@ class Settings(BaseSettings):
         default="muse-spark-1.3",
         validation_alias=AliasChoices("COCONERD_META_MODEL_NAME", "META_MODEL_NAME"),
     )
+    ai_provider: str = Field(
+        default="groq",
+        validation_alias=AliasChoices("COCONERD_AI_PROVIDER", "AI_PROVIDER"),
+    )
+    groq_api_key: SecretStr | None = Field(
+        default=None,
+        validation_alias=AliasChoices("COCONERD_GROQ_API_KEY", "GROQ_API_KEY"),
+    )
+    groq_model: str = Field(
+        default="llama-3.3-70b-versatile",
+        validation_alias=AliasChoices("COCONERD_GROQ_MODEL", "GROQ_MODEL"),
+    )
+    dashboard_base_url: str = Field(
+        default="http://localhost:8000",
+        validation_alias=AliasChoices("COCONERD_DASHBOARD_BASE_URL", "DASHBOARD_BASE_URL"),
+    )
     mock_llm: bool = Field(
         default=False, validation_alias=AliasChoices("COCONERD_MOCK_LLM", "MOCK_LLM")
     )

@@ -76,6 +76,15 @@ class ConversationWorker:
                 )
             )
             effective = ModelSelector.select(self.settings, guild_config, global_config)
+
+        # Support selecting GroqModelProvider seamlessly
+        if getattr(effective, "ai_provider", "meta") == "groq" or (
+            effective.groq_api_key and not effective.meta_api_key
+        ):
+            from backend.infrastructure.groq_provider import GroqModelProvider
+
+            return GroqModelProvider(effective)
+
         return MetaModelProvider(effective)
 
     async def process_once(self) -> bool:
@@ -113,7 +122,7 @@ class ConversationWorker:
             )
             await self._fail_job(job_id, type(exc).__name__)
         finally:
-            if provider is not None and isinstance(provider, MetaModelProvider):
+            if provider is not None and hasattr(provider, "close"):
                 await provider.close()
         return True
 

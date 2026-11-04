@@ -105,18 +105,19 @@ class TopicRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
-    async def candidates(self, guild_id: str, limit: int = 30) -> list[TopicRecord]:
-        result = await self.session.scalars(
-            select(TopicRecord)
-            .where(
-                TopicRecord.guild_id == guild_id,
-                TopicRecord.status.in_(
-                    [TopicStatus.ACTIVE, TopicStatus.DORMANT, TopicStatus.RESUMED]
-                ),
-            )
-            .order_by(TopicRecord.last_activity_at.desc())
-            .limit(limit)
+    async def candidates(
+        self, guild_id: str, channel_id: str | None = None, limit: int = 30
+    ) -> list[TopicRecord]:
+        query = select(TopicRecord).where(
+            TopicRecord.guild_id == guild_id,
+            TopicRecord.status.in_(
+                [TopicStatus.ACTIVE, TopicStatus.DORMANT, TopicStatus.RESUMED]
+            ),
         )
+        if channel_id:
+            query = query.where(TopicRecord.channel_id == channel_id)
+        query = query.order_by(TopicRecord.last_activity_at.desc()).limit(limit)
+        result = await self.session.scalars(query)
         return list(result)
 
     async def get(self, guild_id: str, topic_id: str) -> TopicRecord | None:
@@ -128,10 +129,13 @@ class TopicRepository:
         record = TopicRecord(
             id=topic.id,
             guild_id=topic.guild_id,
+            channel_id=topic.channel_id,
             title=topic.title,
             description=topic.description,
             status=topic.status.value,
+            discord_thread_id=topic.discord_thread_id,
             last_activity_at=topic.last_activity_at,
+            version=1,
         )
         self.session.add(record)
         return record

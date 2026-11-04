@@ -1,3 +1,4 @@
+import html
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -5,9 +6,14 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import uuid4
 
+from urllib.parse import parse_qs
+
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import delete, select, text
+from fastapi.responses import HTMLResponse
+from starlette.datastructures import MutableHeaders
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
+from sqlalchemy import delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from backend.application.services import ChannelNotAllowedError, ingest_message
@@ -18,6 +24,7 @@ from backend.domain.exceptions import InvalidTopicTransition
 from backend.infrastructure.database.connection import create_session_factory
 from backend.infrastructure.database.models import (
     AIDecisionRecord,
+    Base,
     DiscordActionRecord,
     EpisodeRecord,
     GuildSettingsRecord,
@@ -38,12 +45,14 @@ from backend.presentation.api.schemas import (
     ActionResponse,
     GuildSettingsRequest,
     HealthResponse,
+    MessageBatchIngestRequest,
+    MessageBatchIngestResponse,
     MessageIngestRequest,
     MessageIngestResponse,
     ModelConfigRequest,
     ModelConfigResponse,
 )
-from backend.presentation.api.security import admin_key_dependency, bot_key_dependency
+from backend.presentation.api.security import admin_key_dependency, bot_key_dependency, verify_key
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +66,8 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+        async with factory.kw["bind"].begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
         yield
         await factory.kw["bind"].dispose()
 
@@ -77,51 +88,93 @@ def create_app(
             allow_headers=["X-API-Key", "X-Admin-API-Key", "Content-Type"],
         )
 
-    @app.middleware("http")
-    async def enforce_request_limit(request: Request, call_next):
-        request_id = request.headers.get("X-Request-ID") or str(uuid4())
-        request.state.request_id = request_id
-        content_length = request.headers.get("content-length")
-        if content_length:
-            try:
-                too_large = int(content_length) > app_settings.max_request_bytes
-            except ValueError:
-                return Response(
-                    status_code=400,
-                    content="Invalid Content-Length",
-                    headers={"X-Request-ID": request_id},
-                )
-            if too_large:
-                return Response(
-                    status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                    headers={"X-Request-ID": request_id},
-                )
-        chunks: list[bytes] = []
-        total = 0
-        async for chunk in request.stream():
-            total += len(chunk)
-            if total > app_settings.max_request_bytes:
-                return Response(
-                    status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                    headers={"X-Request-ID": request_id},
-                )
-            chunks.append(chunk)
-        body = b"".join(chunks)
-        body_sent = False
+    class RequestLimitMiddleware:
+        def __init__(self, inner_app: ASGIApp, max_request_bytes: int):
+            self.inner_app = inner_app
+            self.max_request_bytes = max_request_bytes
 
-        async def replay_body():
-            nonlocal body_sent
-            if body_sent:
-                return {"type": "http.disconnect"}
-            body_sent = True
-            return {"type": "http.request", "body": body, "more_body": False}
+        async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+            if scope["type"] != "http":
+                await self.inner_app(scope, receive, send)
+                return
 
-        request = Request(request.scope, receive=replay_body)
-        request.state.request_id = request_id
-        response = await call_next(request)
-        response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["X-Request-ID"] = request_id
-        return response
+            # Normalize consecutive slashes in request path to prevent routing mismatches or redirect loops
+            path = scope.get("path", "")
+            if "//" in path:
+                while "//" in path:
+                    path = path.replace("//", "/")
+                scope["path"] = path
+
+            request_id = None
+            content_length_str = None
+            for key, value in scope.get("headers", []):
+                key_lower = key.lower()
+                if key_lower == b"x-request-id":
+                    request_id = value.decode("latin1", errors="replace")
+                elif key_lower == b"content-length":
+                    content_length_str = value.decode("latin1", errors="replace")
+
+            if not request_id:
+                request_id = str(uuid4())
+
+            scope.setdefault("state", {})["request_id"] = request_id
+
+            if content_length_str:
+                try:
+                    too_large = int(content_length_str) > self.max_request_bytes
+                except ValueError:
+                    response = Response(
+                        status_code=400,
+                        content="Invalid Content-Length",
+                        headers={"X-Request-ID": request_id, "X-Content-Type-Options": "nosniff"},
+                    )
+                    await response(scope, receive, send)
+                    return
+                if too_large:
+                    response = Response(
+                        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                        headers={"X-Request-ID": request_id, "X-Content-Type-Options": "nosniff"},
+                    )
+                    await response(scope, receive, send)
+                    return
+
+            messages: list[Message] = []
+            total_bytes = 0
+            more_body = True
+            while more_body:
+                message = await receive()
+                messages.append(message)
+                if message["type"] == "http.request":
+                    chunk = message.get("body", b"")
+                    total_bytes += len(chunk)
+                    if total_bytes > self.max_request_bytes:
+                        response = Response(
+                            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                            headers={"X-Request-ID": request_id, "X-Content-Type-Options": "nosniff"},
+                        )
+                        await response(scope, receive, send)
+                        return
+                    more_body = message.get("more_body", False)
+                elif message["type"] == "http.disconnect":
+                    return
+
+            message_queue = list(messages)
+
+            async def replay_receive() -> Message:
+                if message_queue:
+                    return message_queue.pop(0)
+                return {"type": "http.request", "body": b"", "more_body": False}
+
+            async def send_wrapper(message: Message) -> None:
+                if message["type"] == "http.response.start":
+                    headers = MutableHeaders(scope=message)
+                    headers["X-Content-Type-Options"] = "nosniff"
+                    headers["X-Request-ID"] = request_id
+                await send(message)
+
+            await self.inner_app(scope, replay_receive, send_wrapper)
+
+    app.add_middleware(RequestLimitMiddleware, max_request_bytes=app_settings.max_request_bytes)
 
     async def get_session() -> AsyncIterator[AsyncSession]:
         async with factory() as session:
@@ -195,6 +248,121 @@ def create_app(
             raise HTTPException(status_code=403, detail=str(exc)) from exc
         return MessageIngestResponse(message_id=record.discord_message_id)
 
+    @app.post(
+        "/api/v1/messages/batch",
+        response_model=MessageBatchIngestResponse,
+        status_code=status.HTTP_202_ACCEPTED,
+        tags=["messages"],
+        dependencies=bot_dependencies,
+    )
+    async def ingest_batch(
+        body: MessageBatchIngestRequest,
+        session: AsyncSession = Depends(get_session),
+    ) -> MessageBatchIngestResponse:
+        accepted_ids = []
+        for msg_in in body.messages:
+            if len(msg_in.content) > app_settings.max_message_length:
+                continue
+            message = ConversationMessage(
+                guild_id=msg_in.guild_id,
+                channel_id=msg_in.channel_id,
+                message_id=msg_in.message_id,
+                author_id=msg_in.author_id,
+                author_name=msg_in.author_name,
+                content=msg_in.content,
+                created_at=msg_in.created_at,
+                reply_to_message_id=msg_in.reply_to_message_id,
+            )
+            try:
+                record, _ = await ingest_message(
+                    session, message, max_attempts=app_settings.worker_max_attempts
+                )
+                accepted_ids.append(record.discord_message_id)
+            except ChannelNotAllowedError:
+                continue
+        return MessageBatchIngestResponse(accepted=len(accepted_ids), message_ids=accepted_ids)
+
+    @app.get(
+        "/api/v1/guilds/{guild_id}/settings",
+        tags=["guilds"],
+        dependencies=bot_dependencies,
+    )
+    async def get_guild_settings_for_bot(
+        guild_id: str,
+        session: AsyncSession = Depends(get_session),
+    ) -> dict[str, Any]:
+        record = await session.get(GuildSettingsRecord, guild_id)
+        if record is None:
+            return {
+                "guild_id": guild_id,
+                "enabled": False,
+                "allowed_channel_ids": [],
+                "output_channel_id": None,
+                "retention_days": 365,
+            }
+        return {
+            "guild_id": record.guild_id,
+            "enabled": record.enabled,
+            "allowed_channel_ids": record.allowed_channel_ids or [],
+            "output_channel_id": record.output_channel_id,
+            "retention_days": record.retention_days,
+        }
+
+    @app.put(
+        "/api/v1/guilds/{guild_id}/settings",
+        tags=["guilds"],
+        dependencies=bot_dependencies,
+    )
+    async def update_guild_settings_for_bot(
+        guild_id: str,
+        body: GuildSettingsRequest,
+        session: AsyncSession = Depends(get_session),
+    ) -> dict[str, Any]:
+        logger.info("Updating guild settings via bot API: guild_id=%s, enabled=%s", guild_id, body.enabled)
+        record = await session.get(GuildSettingsRecord, guild_id)
+        if record is None:
+            record = GuildSettingsRecord(guild_id=guild_id, enabled=body.enabled)
+            session.add(record)
+        record.enabled = body.enabled
+        record.allowed_channel_ids = body.allowed_channel_ids
+        record.output_channel_id = body.output_channel_id
+        record.retention_days = body.retention_days
+        record.updated_at = datetime.now(UTC)
+        await session.commit()
+        return {
+            "guild_id": record.guild_id,
+            "enabled": record.enabled,
+            "allowed_channel_ids": record.allowed_channel_ids,
+            "output_channel_id": record.output_channel_id,
+            "retention_days": record.retention_days,
+        }
+
+    @app.get(
+        "/api/v1/admin/guilds/{guild_id}/settings",
+        tags=["admin"],
+        dependencies=admin_dependencies,
+    )
+    async def get_admin_guild_settings(
+        guild_id: str,
+        session: AsyncSession = Depends(get_session),
+    ) -> dict[str, Any]:
+        record = await session.get(GuildSettingsRecord, guild_id)
+        if record is None:
+            return {
+                "guild_id": guild_id,
+                "enabled": False,
+                "allowed_channel_ids": [],
+                "output_channel_id": None,
+                "retention_days": 365,
+            }
+        return {
+            "guild_id": record.guild_id,
+            "enabled": record.enabled,
+            "allowed_channel_ids": record.allowed_channel_ids or [],
+            "output_channel_id": record.output_channel_id,
+            "retention_days": record.retention_days,
+        }
+
     @app.put(
         "/api/v1/admin/guilds/{guild_id}/settings",
         tags=["admin"],
@@ -205,18 +373,22 @@ def create_app(
         body: GuildSettingsRequest,
         session: AsyncSession = Depends(get_session),
     ) -> dict[str, Any]:
+        logger.info("Updating guild settings via admin API: guild_id=%s, enabled=%s", guild_id, body.enabled)
         record = await session.get(GuildSettingsRecord, guild_id)
         if record is None:
             record = GuildSettingsRecord(guild_id=guild_id, enabled=body.enabled)
             session.add(record)
         record.enabled = body.enabled
         record.allowed_channel_ids = body.allowed_channel_ids
+        record.output_channel_id = body.output_channel_id
         record.retention_days = body.retention_days
+        record.updated_at = datetime.now(UTC)
         await session.commit()
         return {
             "guild_id": record.guild_id,
             "enabled": record.enabled,
             "allowed_channel_ids": record.allowed_channel_ids,
+            "output_channel_id": record.output_channel_id,
             "retention_days": record.retention_days,
         }
 
@@ -239,8 +411,6 @@ def create_app(
             )
         )
         if record is None:
-            from uuid import uuid4
-
             record = ModelConfigRecord(
                 id=str(uuid4()),
                 scope=scope,
@@ -294,8 +464,8 @@ def create_app(
                 id="default",
                 scope="global",
                 guild_id=None,
-                provider="meta",
-                model_id=app_settings.meta_model_name,
+                provider="groq" if app_settings.ai_provider == "groq" else "meta",
+                model_id=app_settings.groq_model if app_settings.ai_provider == "groq" else app_settings.meta_model_name,
                 temperature=app_settings.llm_temperature,
                 max_tokens=app_settings.llm_max_tokens,
             )
@@ -400,13 +570,68 @@ def create_app(
             "PENDING" if body.retryable and action.attempt_count < action.max_attempts else "DEAD"
         )
         if action.status == "PENDING":
-            from datetime import timedelta
-
             action.available_at = datetime.now(UTC) + timedelta(
                 seconds=min(300, 2**action.attempt_count)
             )
         await session.commit()
         return {"action_id": action.id, "status": action.status}
+
+    @app.get(
+        "/api/v1/topics",
+        tags=["topics"],
+        dependencies=bot_dependencies,
+    )
+    async def list_topics(
+        guild_id: str = Query(min_length=1, max_length=100),
+        channel_id: str | None = Query(default=None, max_length=100),
+        include_closed: bool = Query(default=False),
+        limit: int = Query(default=50, ge=1, le=100),
+        session: AsyncSession = Depends(get_session),
+    ) -> dict[str, Any]:
+        stmt = select(TopicRecord).where(TopicRecord.guild_id == guild_id)
+        if channel_id:
+            stmt = stmt.where(TopicRecord.channel_id == channel_id)
+        if not include_closed:
+            stmt = stmt.where(
+                TopicRecord.status.in_(
+                    [TopicStatus.ACTIVE, TopicStatus.DORMANT, TopicStatus.RESUMED]
+                )
+            )
+        stmt = stmt.order_by(TopicRecord.last_activity_at.desc()).limit(limit)
+        records = (await session.scalars(stmt)).all()
+
+        topic_ids = [t.id for t in records]
+        counts: dict[str, int] = {}
+        if topic_ids:
+            count_stmt = (
+                select(
+                    MessageTopicAssociationRecord.topic_id,
+                    func.count(MessageTopicAssociationRecord.id),
+                )
+                .where(
+                    MessageTopicAssociationRecord.guild_id == guild_id,
+                    MessageTopicAssociationRecord.topic_id.in_(topic_ids),
+                )
+                .group_by(MessageTopicAssociationRecord.topic_id)
+            )
+            count_rows = (await session.execute(count_stmt)).all()
+            counts = {row[0]: row[1] for row in count_rows}
+
+        return {
+            "items": [
+                {
+                    "topic_id": t.id,
+                    "channel_id": t.channel_id,
+                    "title": t.title,
+                    "description": t.description,
+                    "status": t.status,
+                    "discord_thread_id": t.discord_thread_id,
+                    "last_activity": t.last_activity_at.isoformat() if t.last_activity_at else None,
+                    "message_count": counts.get(t.id, 0),
+                }
+                for t in records
+            ]
+        }
 
     @app.get(
         "/api/v1/topics/{topic_id}",
@@ -426,11 +651,12 @@ def create_app(
         return {
             "topic_id": topic.id,
             "guild_id": topic.guild_id,
+            "channel_id": topic.channel_id,
             "title": topic.title,
             "description": topic.description,
             "status": topic.status,
             "discord_thread_id": topic.discord_thread_id,
-            "last_activity": topic.last_activity_at,
+            "last_activity": topic.last_activity_at.isoformat() if topic.last_activity_at else None,
         }
 
     @app.get(
@@ -469,7 +695,7 @@ def create_app(
                     "author_id": message.author_id,
                     "author_name": message.author_name,
                     "content": message.content,
-                    "created_at": message.created_at,
+                    "created_at": message.created_at.isoformat() if message.created_at else None,
                     "reply_to_message_id": message.reply_to_message_id,
                 }
                 for message in messages
@@ -485,8 +711,19 @@ def create_app(
     async def get_topic_summary(
         topic_id: str,
         guild_id: str = Query(min_length=1, max_length=100),
+        channel_id: str | None = Query(default=None, max_length=100),
         session: AsyncSession = Depends(get_session),
     ) -> dict[str, Any]:
+        topic = await session.scalar(
+            select(TopicRecord).where(
+                TopicRecord.id == topic_id, TopicRecord.guild_id == guild_id
+            )
+        )
+        if topic is None:
+            raise HTTPException(status_code=404, detail="Topic not found")
+        if channel_id and topic.channel_id and topic.channel_id != channel_id:
+            raise HTTPException(status_code=404, detail="Topic not found in this channel")
+
         summary = await session.scalar(
             select(TopicSummaryRecord)
             .where(TopicSummaryRecord.guild_id == guild_id, TopicSummaryRecord.topic_id == topic_id)
@@ -497,6 +734,10 @@ def create_app(
             raise HTTPException(status_code=404, detail="Topic summary not found")
         return {
             **summary.data,
+            "topic_id": topic.id,
+            "title": topic.title,
+            "status": topic.status,
+            "channel_id": topic.channel_id,
             "version": summary.version,
             "source_message_ids": summary.source_message_ids,
         }
@@ -553,7 +794,7 @@ def create_app(
         )
         if topic is None:
             raise HTTPException(status_code=404, detail="Topic not found")
-        lifecycle = ConversationTopic.create(topic.guild_id, topic.title)
+        lifecycle = ConversationTopic.create(topic.guild_id, topic.title, channel_id=topic.channel_id)
         lifecycle.status = TopicStatus(topic.status)
         try:
             lifecycle.close()
@@ -617,6 +858,297 @@ def create_app(
         await session.delete(topic)
         await session.commit()
         return {"topic_id": topic_id, "status": "deleted"}
+
+    # =========================================================================
+    # Dashboard Setup UI (/setup/{guild_id})
+    # =========================================================================
+    @app.get("/setup/{guild_id}", response_class=HTMLResponse, tags=["dashboard"])
+    @app.get("/dashboard/setup/{guild_id}", response_class=HTMLResponse, tags=["dashboard"])
+    async def setup_dashboard_view(
+        guild_id: str,
+        admin_key: str | None = Query(default=None),
+        session: AsyncSession = Depends(get_session),
+    ) -> HTMLResponse:
+        record = await session.get(GuildSettingsRecord, guild_id)
+        enabled = record.enabled if record else True
+        allowed_channels = ",".join(record.allowed_channel_ids) if record and record.allowed_channel_ids else ""
+        output_channel = record.output_channel_id or "" if record else ""
+        retention = record.retention_days if record else 365
+        default_admin_key = ""
+
+        page_html = f"""<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🥥 Coconerd Setup Dashboard</title>
+    <style>
+        :root {{
+            --bg: #0f172a;
+            --surface: #1e293b;
+            --border: #334155;
+            --accent: #38bdf8;
+            --accent-hover: #0284c7;
+            --text: #f8fafc;
+            --text-dim: #94a3b8;
+            --success: #22c55e;
+            --danger: #ef4444;
+        }}
+        * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+        body {{
+            background: var(--bg);
+            color: var(--text);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+        }}
+        .card {{
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            max-width: 620px;
+            width: 100%;
+            padding: 32px;
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.4);
+        }}
+        .header {{
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            margin-bottom: 24px;
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 20px;
+        }}
+        .logo {{ font-size: 44px; }}
+        h1 {{ font-size: 22px; font-weight: 700; color: #fff; }}
+        p.subtitle {{ font-size: 14px; color: var(--text-dim); margin-top: 4px; }}
+        .badge {{
+            display: inline-block;
+            background: #0284c722;
+            color: var(--accent);
+            padding: 4px 10px;
+            border-radius: 9999px;
+            font-size: 12px;
+            font-weight: 600;
+            margin-top: 6px;
+            font-family: monospace;
+        }}
+        .form-group {{ margin-bottom: 20px; }}
+        label {{
+            display: block;
+            font-size: 13px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--text-dim);
+            margin-bottom: 8px;
+        }}
+        .hint {{
+            font-size: 12px;
+            color: #64748b;
+            margin-top: 5px;
+        }}
+        input[type="text"], input[type="password"], input[type="number"], textarea {{
+            width: 100%;
+            background: #0f172a;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 10px 14px;
+            color: var(--text);
+            font-size: 14px;
+            outline: none;
+            transition: border-color 0.15s;
+        }}
+        input:focus, textarea:focus {{
+            border-color: var(--accent);
+        }}
+        .checkbox-row {{
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 20px;
+            cursor: pointer;
+        }}
+        .checkbox-row input {{
+            width: 18px;
+            height: 18px;
+            accent-color: var(--accent);
+            cursor: pointer;
+        }}
+        .btn {{
+            width: 100%;
+            background: var(--accent);
+            color: #0f172a;
+            font-weight: 700;
+            font-size: 15px;
+            border: none;
+            border-radius: 8px;
+            padding: 12px;
+            cursor: pointer;
+            transition: background 0.15s;
+            margin-top: 10px;
+        }}
+        .btn:hover {{ background: var(--accent-hover); }}
+        .btn:disabled {{ opacity: 0.6; cursor: not-allowed; }}
+        #banner {{
+            display: none;
+            padding: 12px 16px;
+            border-radius: 8px;
+            font-size: 14px;
+            margin-bottom: 20px;
+            font-weight: 500;
+        }}
+        #banner.success {{ display: block; background: #052e16; color: #4ade80; border: 1px solid #166534; }}
+        #banner.error {{ display: block; background: #450a0a; color: #f87171; border: 1px solid #991b1b; }}
+    </style>
+</head>
+<body>
+    <div class="card">
+        <div class="header">
+            <div class="logo">🥥</div>
+            <div>
+                <h1>Coconerd Guild Setup</h1>
+                <p class="subtitle">Cấu hình kênh theo dõi và kênh tổng hợp cho máy chủ Discord</p>
+                <div class="badge">GUILD ID: {html.escape(guild_id)}</div>
+            </div>
+        </div>
+
+        <div id="banner"></div>
+
+        <form id="setupForm" method="POST" action="/setup/{html.escape(guild_id)}">
+            <div class="form-group">
+                <label for="adminKey">Admin API Key</label>
+                <input type="password" id="adminKey" name="admin_key" value="{html.escape(default_admin_key)}" placeholder="Nhập COCONERD_ADMIN_API_KEY..." required>
+                <div class="hint">Khóa quản trị Backend (COCONERD_ADMIN_API_KEY).</div>
+            </div>
+
+            <div class="checkbox-row">
+                <input type="checkbox" id="enabled" name="enabled" value="true" {"checked" if enabled else ""}>
+                <label for="enabled" style="margin:0; text-transform:none; font-size:14px; color:var(--text); cursor:pointer;">
+                    Kích hoạt Coconerd cho máy chủ này (Enabled)
+                </label>
+            </div>
+
+            <div class="form-group">
+                <label for="allowedChannels">Input Channels (Kênh theo dõi)</label>
+                <input type="text" id="allowedChannels" name="allowed_channels" value="{html.escape(allowed_channels)}" placeholder="1234567890, 9876543210">
+                <div class="hint">Danh sách Channel ID mà Bot được phép đọc tin nhắn, cách nhau bởi dấu phẩy.</div>
+            </div>
+
+            <div class="form-group">
+                <label for="outputChannel">Output Channel (Kênh xuất thông báo / Topic)</label>
+                <input type="text" id="outputChannel" name="output_channel" value="{html.escape(output_channel)}" placeholder="1234567890">
+                <div class="hint">Channel ID nơi Bot sẽ tự động tạo Thread và gửi thông báo tổng hợp Topic mới.</div>
+            </div>
+
+            <div class="form-group">
+                <label for="retentionDays">Data Retention (Số ngày lưu trữ)</label>
+                <input type="number" id="retentionDays" name="retention_days" value="{retention}" min="1" max="3650">
+            </div>
+
+            <button type="submit" class="btn" id="saveBtn">Lưu Cấu Hình</button>
+        </form>
+    </div>
+
+    <script>
+        const form = document.getElementById("setupForm");
+        const banner = document.getElementById("banner");
+        const saveBtn = document.getElementById("saveBtn");
+
+        function showMessage(type, text) {{
+            banner.className = type;
+            banner.innerText = text;
+            window.scrollTo({{ top: 0, behavior: 'smooth' }});
+        }}
+
+        form.addEventListener("submit", async (e) => {{
+            e.preventDefault();
+            saveBtn.disabled = true;
+            saveBtn.innerText = "Đang lưu cấu hình...";
+
+            const adminKey = document.getElementById("adminKey").value.trim();
+            const enabled = document.getElementById("enabled").checked;
+            const rawChannels = document.getElementById("allowedChannels").value.trim();
+            const outputChannel = document.getElementById("outputChannel").value.trim();
+            const retentionDays = parseInt(document.getElementById("retentionDays").value, 10) || 365;
+
+            const allowedChannelIds = rawChannels
+                ? rawChannels.split(",").map(s => s.trim()).filter(Boolean)
+                : [];
+
+            const payload = {{
+                enabled: enabled,
+                allowed_channel_ids: allowedChannelIds,
+                output_channel_id: outputChannel || null,
+                retention_days: retentionDays
+            }};
+
+            try {{
+                const res = await fetch("/api/v1/admin/guilds/{html.escape(guild_id)}/settings", {{
+                    method: "PUT",
+                    headers: {{
+                        "Content-Type": "application/json",
+                        "X-Admin-API-Key": adminKey
+                    }},
+                    body: JSON.stringify(payload)
+                }});
+
+                if (res.ok) {{
+                    const data = await res.json();
+                    showMessage("success", "✅ Đã lưu cấu hình Guild thành công! Bot đã sẵn sàng lắng nghe các kênh đã chọn.");
+                }} else {{
+                    const err = await res.json().catch(() => ({{ detail: res.statusText }}));
+                    showMessage("error", "❌ Lỗi (" + res.status + "): " + (err.detail || "Không thể lưu cấu hình."));
+                }}
+            }} catch (exc) {{
+                showMessage("error", "❌ Lỗi mạng hoặc không thể kết nối tới Backend: " + exc.message);
+            }} finally {{
+                saveBtn.disabled = false;
+                saveBtn.innerText = "Lưu Cấu Hình";
+            }}
+        }});
+    </script>
+</body>
+</html>
+"""
+        return HTMLResponse(content=page_html)
+
+    @app.post("/setup/{guild_id}", response_class=HTMLResponse, tags=["dashboard"])
+    async def setup_dashboard_submit(
+        guild_id: str,
+        request: Request,
+        session: AsyncSession = Depends(get_session),
+    ) -> HTMLResponse:
+        # Fallback server-side form submission handler without python-multipart dependency
+        body_bytes = await request.body()
+        form_data = parse_qs(body_bytes.decode("utf-8", errors="replace"))
+        admin_key = form_data.get("admin_key", [""])[0]
+        verify_key(app_settings.admin_api_key, admin_key, "Admin API")
+        enabled = form_data.get("enabled", ["false"])[0].lower() in ("true", "1", "on")
+        allowed_channels = form_data.get("allowed_channels", [""])[0]
+        output_channel = form_data.get("output_channel", [""])[0]
+        try:
+            retention_days = int(form_data.get("retention_days", ["365"])[0])
+        except ValueError:
+            retention_days = 365
+        record = await session.get(GuildSettingsRecord, guild_id)
+        if record is None:
+            record = GuildSettingsRecord(guild_id=guild_id, enabled=enabled)
+            session.add(record)
+        record.enabled = enabled
+        record.allowed_channel_ids = [c.strip() for c in allowed_channels.split(",") if c.strip()]
+        record.output_channel_id = output_channel.strip() or None
+        record.retention_days = retention_days
+        await session.commit()
+        return HTMLResponse(
+            f"<html><body style='background:#0f172a;color:#fff;font-family:sans-serif;padding:40px;text-align:center;'>"
+            f"<h2>🥥 Cấu hình máy chủ {html.escape(guild_id)} đã lưu thành công!</h2>"
+            f"<p><a href='/setup/{html.escape(guild_id)}' style='color:#38bdf8;'>Quay lại trang Setup</a></p>"
+            f"</body></html>"
+        )
 
     return app
 

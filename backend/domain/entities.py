@@ -30,6 +30,7 @@ class ConversationMessage:
 class ConversationTopic:
     guild_id: str
     title: str
+    channel_id: str | None = None
     id: str = field(default_factory=lambda: str(uuid4()))
     description: str = ""
     status: TopicStatus = TopicStatus.ACTIVE
@@ -38,11 +39,11 @@ class ConversationTopic:
     last_activity_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     @classmethod
-    def create(cls, guild_id: str, title: str) -> "ConversationTopic":
+    def create(cls, guild_id: str, title: str, channel_id: str | None = None) -> "ConversationTopic":
         normalized_title = title.strip()
         if not guild_id.strip() or not normalized_title:
             raise ValueError("guild_id and title must not be empty")
-        return cls(guild_id=guild_id, title=normalized_title)
+        return cls(guild_id=guild_id, title=normalized_title, channel_id=channel_id)
 
     def transition_to(self, status: TopicStatus) -> None:
         if status not in _TRANSITIONS[self.status]:
