@@ -1,0 +1,60 @@
+{
+  "mode": "live",
+  "synthetic": true,
+  "model_accuracy_claim": false,
+  "cases": 4,
+  "completed": 4,
+  "errors": 0,
+  "skipped": 0,
+  "prediction_coverage": 1.0,
+  "outcome_accuracy": 1.0,
+  "decision_accuracy": 1.0,
+  "candidate_recall_at_5": 1.0,
+  "existing_labels": 3,
+  "retrieved_gold_topics": 3,
+  "wrong_merges": 0,
+  "wrong_merge_rate": 0.0,
+  "duplicate_new": 0,
+  "defer_precision": 1.0,
+  "assignment_coverage": 0.75,
+  "assignment_precision": 1.0,
+  "reserved_model_calls": 3,
+  "usage": {
+    "prompt_tokens": {
+      "known_sum": 4646,
+      "known_cases": 4,
+      "total": 4646
+    },
+    "completion_tokens": {
+      "known_sum": 3347,
+      "known_cases": 4,
+      "total": 3347
+    },
+    "cached_tokens": {
+      "known_sum": 2018,
+      "known_cases": 4,
+      "total": 2018
+    },
+    "reasoning_tokens": {
+      "known_sum": 2508,
+      "known_cases": 4,
+      "total": 2508
+    },
+    "total_tokens": 7993
+  },
+  "latency_ms": {
+    "known_cases": 4,
+    "all_cases_mean": 12248.0,
+    "model_attempts_known": 3,
+    "model_attempts_mean": 16319.333333333334
+  },
+  "configuration": {
+    "requested_model": "muse-spark-1.3",
+    "reasoning_effort": "low",
+    "max_output_tokens": 2048,
+    "prompt_cache_key": "coconerd-topic-classification-v4-memory-v1",
+    "max_calls": 4,
+    "sdk_retries": 0,
+    "fixture_sha256": "7d77fa6ceaea8c5eb0cb1a0b1931fa45fb6af8ef253bc230a3c9da761dcc4443"
+  }
+}

@@ -33,12 +33,14 @@ class ActionClaimRequest(BaseModel):
 
 
 class ActionCompletionRequest(BaseModel):
+    lease_token: str | None = Field(default=None, min_length=1, max_length=36)
     worker_id: str = Field(min_length=1, max_length=100)
     discord_thread_id: str | None = Field(default=None, max_length=100)
     discord_message_id: str | None = Field(default=None, max_length=100)
 
 
 class ActionFailureRequest(BaseModel):
+    lease_token: str | None = Field(default=None, min_length=1, max_length=36)
     worker_id: str = Field(min_length=1, max_length=100)
     error_type: str = Field(min_length=1, max_length=100)
     error_message: str = Field(min_length=1, max_length=1000)
@@ -46,6 +48,7 @@ class ActionFailureRequest(BaseModel):
 
 
 class ActionResponse(BaseModel):
+    lease_token: str | None = Field(default=None, min_length=1, max_length=36)
     model_config = ConfigDict(from_attributes=True)
 
     action_id: str

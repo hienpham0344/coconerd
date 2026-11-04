@@ -134,35 +134,41 @@ async def test_claim_policy_owns_lease_deadline():
     [(None, NotFound), (action(lease_owner="other"), Conflict), (action(status="DEAD"), Conflict)],
 )
 async def test_action_rejects_missing_or_foreign_lease(state, error):
-    repo = SimpleNamespace(get=AsyncMock(return_value=state), update=AsyncMock())
+    repo = SimpleNamespace(
+        get=AsyncMock(return_value=state), update_leased=AsyncMock(return_value=True)
+    )
     work = uow(actions=repo)
     with pytest.raises(error):
         await actions.complete_action(work, "a", "worker", "thread", None)
     with pytest.raises(error):
         await actions.fail_action(work, "a", "worker", "Error", "failed", True)
-    repo.update.assert_not_awaited()
+    repo.update_leased.assert_not_awaited()
     work.commit.assert_not_awaited()
 
 
 async def test_action_completion_requires_thread_and_consistent_topic_before_write():
-    repo = SimpleNamespace(get=AsyncMock(return_value=action()), update=AsyncMock())
+    repo = SimpleNamespace(
+        get=AsyncMock(return_value=action()), update_leased=AsyncMock(return_value=True)
+    )
     work = uow(actions=repo, topics=SimpleNamespace(get=AsyncMock(return_value=None)))
     with pytest.raises(InvalidTransition):
         await actions.complete_action(work, "a", "worker", None, None)
     with pytest.raises(Conflict, match="inconsistent"):
         await actions.complete_action(work, "a", "worker", "thread", None)
-    repo.update.assert_not_awaited()
+    repo.update_leased.assert_not_awaited()
     work.commit.assert_not_awaited()
 
 
 async def test_action_completion_updates_thread_and_repeats_without_commit():
-    repo = SimpleNamespace(get=AsyncMock(return_value=action()), update=AsyncMock())
+    repo = SimpleNamespace(
+        get=AsyncMock(return_value=action()), update_leased=AsyncMock(return_value=True)
+    )
     topic_repo = SimpleNamespace(get=AsyncMock(return_value=topic()), set_thread=AsyncMock())
     work = uow(actions=repo, topics=topic_repo)
     result = await actions.complete_action(work, "a", "worker", "thread", None)
     assert result.status == "SUCCEEDED"
     topic_repo.set_thread.assert_awaited_once_with("g", "t", "thread")
-    assert repo.update.call_args.kwargs["lease_owner"] is None
+    assert repo.update_leased.call_args.kwargs["lease_owner"] is None
     work.commit.assert_awaited_once()
     work.commit.reset_mock()
     repo.get.return_value = action(status="SUCCEEDED", discord_thread_id="thread")
@@ -181,13 +187,13 @@ async def test_action_retry_budget_and_backoff(attempts, retryable, expected):
         get=AsyncMock(
             return_value=action(attempt_count=attempts, max_attempts=11 if attempts == 10 else 3)
         ),
-        update=AsyncMock(),
+        update_leased=AsyncMock(return_value=True),
     )
     work = uow(actions=repo)
     before = datetime.now(UTC)
     result = await actions.fail_action(work, "a", "worker", "Error", "failed", retryable)
     assert result.status == expected
-    changes = repo.update.call_args.kwargs
+    changes = repo.update_leased.call_args.kwargs
     assert changes["lease_owner"] is None and changes["lease_expires_at"] is None
     if expected == "PENDING":
         assert changes["available_at"] >= before + timedelta(seconds=min(300, 2**attempts))
@@ -213,13 +219,15 @@ async def test_health_probe_failure_and_stale_worker():
 
 async def test_action_completion_rejects_inconsistent_topic_guild():
     foreign_topic = TopicReadModel("t", "other", "Title", "", "ACTIVE", datetime.now(UTC), 1, None)
-    repo = SimpleNamespace(get=AsyncMock(return_value=action()), update=AsyncMock())
+    repo = SimpleNamespace(
+        get=AsyncMock(return_value=action()), update_leased=AsyncMock(return_value=True)
+    )
     work = uow(
         actions=repo,
         topics=SimpleNamespace(get=AsyncMock(return_value=foreign_topic), set_thread=AsyncMock()),
     )
     with pytest.raises(Conflict, match="inconsistent"):
         await actions.complete_action(work, "a", "worker", "thread", None)
-    repo.update.assert_not_awaited()
+    repo.update_leased.assert_not_awaited()
     work.topics.set_thread.assert_not_awaited()
     work.commit.assert_not_awaited()

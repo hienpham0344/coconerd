@@ -72,7 +72,42 @@ def test_valid_assignment_retains_evidence_and_policy_version():
     checked = validate_classification(result(), message(), [candidate()], [])
     assert checked.decision.outcome == "existing"
     assert checked.decision.evidence_message_ids == ["target"]
-    assert checked.policy_version == "topic-policy-v3"
+    assert checked.policy_version == "topic-policy-v4"
+
+
+@pytest.mark.parametrize("outcome", ["new", "existing"])
+@pytest.mark.parametrize("confidence", [0.0, 0.01, 0.69])
+def test_low_confidence_assignment_defers_without_memory(outcome, confidence):
+    checked = validate_classification(
+        result(
+            outcome=outcome,
+            topic_id="mobile" if outcome == "existing" else None,
+            title="Separate project" if outcome == "new" else None,
+            confidence=confidence,
+            summary="must not be stored",
+            decisions=["must not be accepted"],
+        ),
+        message(),
+        [candidate()],
+        [],
+    )
+    assert checked.decision.outcome == "defer"
+    assert checked.decision.defer_reason == "ambiguous"
+    assert checked.decision.summary == ""
+    assert checked.decision.decisions == []
+    assert checked.decision.topic_id is None
+
+
+def test_assignment_at_confidence_floor_still_requires_valid_evidence():
+    checked = validate_classification(result(confidence=0.7), message(), [candidate()], [])
+    assert checked.decision.outcome == "existing"
+    invalid = validate_classification(
+        result(confidence=0.7, evidence_message_ids=["invented"]),
+        message(),
+        [candidate()],
+        [],
+    )
+    assert invalid.decision.defer_reason == "invalid_evidence"
 
 
 def test_identical_title_does_not_force_merge():

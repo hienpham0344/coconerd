@@ -11,6 +11,7 @@ from backend.infrastructure.database.models import (
     MessageTopicAssociationRecord,
     ModelConfigRecord,
     ProcessingJobRecord,
+    ReviewEventRecord,
     TopicRecord,
     TopicSearchTermRecord,
     TopicSummaryRecord,
@@ -36,6 +37,9 @@ class GuildRepository:
         return settings
 
     async def delete_data(self, guild_id: str) -> None:
+        await self.session.execute(
+            delete(ReviewEventRecord).where(ReviewEventRecord.guild_id == guild_id)
+        )
         topic_ids = select(TopicRecord.id).where(TopicRecord.guild_id == guild_id)
         message_ids = select(MessageRecord.id).where(MessageRecord.guild_id == guild_id)
         await self.session.execute(

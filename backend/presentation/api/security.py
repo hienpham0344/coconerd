@@ -5,12 +5,14 @@ from pydantic import SecretStr
 
 
 def verify_key(expected: SecretStr | None, supplied: str | None, label: str) -> None:
-    if expected is None:
+    if expected is None or not expected.get_secret_value().strip():
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=f"{label} credential is not configured",
         )
-    if supplied is None or not hmac.compare_digest(expected.get_secret_value(), supplied):
+    if supplied is None or not hmac.compare_digest(
+        expected.get_secret_value().encode("utf-8"), supplied.encode("utf-8")
+    ):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")
 
 

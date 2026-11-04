@@ -106,7 +106,7 @@ async def test_claim_and_failure_retry_budget_and_dead_letter(database):
     session.commit()
     job = await claim_job(uow, "worker", 30)
     assert job.id == "j"
-    await fail_job(uow, "j", "FirstFailure")
+    await fail_job(uow, "j", "FirstFailure", owner="worker")
     session.expire_all()
     row = session.get(ProcessingJobRecord, "j")
     assert (row.status, row.attempt_count, row.lease_owner, row.error_type) == (
@@ -121,11 +121,11 @@ async def test_claim_and_failure_retry_budget_and_dead_letter(database):
     row.available_at = datetime.now(UTC) - timedelta(seconds=1)
     session.commit()
     assert (await claim_job(uow, "worker", 30)).id == "j"
-    await fail_job(uow, "j", "FinalFailure")
+    await fail_job(uow, "j", "FinalFailure", owner="worker")
     session.expire_all()
     assert session.get(ProcessingJobRecord, "j").status == "DEAD"
     assert await claim_job(uow, "worker", 30) is None
-    await fail_job(uow, "missing", "Ignored")
+    await fail_job(uow, "missing", "Ignored", owner="worker")
 
 
 async def test_nonretryable_failure_stops_job_and_preserves_message(database):
@@ -136,7 +136,7 @@ async def test_nonretryable_failure_stops_job_and_preserves_message(database):
     session.commit()
     assert (await claim_job(uow, "worker", 30)).id == "j"
 
-    await fail_job(uow, "j", "MetaOutputTruncatedError", retryable=False)
+    await fail_job(uow, "j", "MetaOutputTruncatedError", owner="worker", retryable=False)
 
     session.expire_all()
     job = session.get(ProcessingJobRecord, "j")

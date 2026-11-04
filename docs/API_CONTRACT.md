@@ -1,6 +1,10 @@
 # Discord bot API contract
 
+Start with [backend/database setup](BACKEND_SETUP.md) and the [bot integration guide](BOT_INTEGRATION.md) for a runnable local smoke flow, action mapping and recovery rules.
+
 Base path: `/api/v1`. JSON is UTF-8. Bot routes require `X-API-Key`; administrator routes require the separate `X-Admin-API-Key`. Responses include `X-Request-ID`. Requests exceeding `MAX_REQUEST_BYTES` return `413`; rate limits return `429` with `Retry-After`.
+
+Topic summary reads share the bot request rate limit. Empty or whitespace-only configured credentials fail closed with `503`; invalid supplied keys, including non-ASCII values, return `401`.
 
 ## Configure guild access
 
@@ -38,10 +42,10 @@ Ambiguous messages may remain deferred. An explicit reply to the target, or a sa
 ## Claim and acknowledge Discord actions
 
 - `POST /actions/claim` request: `{"worker_id":"bot-worker-01","limit":20}`.
-- `POST /actions/{action_id}/complete` request: `{"worker_id":"bot-worker-01","discord_thread_id":"thread_001","discord_message_id":null}`.
-- `POST /actions/{action_id}/fail` request: `{"worker_id":"bot-worker-01","error_type":"DiscordUnavailable","error_message":"temporary failure","retryable":true}`.
+- `POST /actions/{action_id}/complete` request: `{"worker_id":"bot-worker-01","lease_token":"00000000-0000-4000-8000-000000000001","discord_thread_id":"thread_001","discord_message_id":null}`.
+- `POST /actions/{action_id}/fail` request: `{"worker_id":"bot-worker-01","lease_token":"00000000-0000-4000-8000-000000000001","error_type":"DiscordUnavailable","error_message":"temporary failure","retryable":true}`.
 
-Actions use `CREATE_THREAD`, `APPEND_MESSAGE`, `UPSERT_SUMMARY`, or `RENAME_THREAD`. Each action has a stable `action_id`; the bot should use it as its idempotency key when executing Discord operations. A `CREATE_THREAD` completion must include the resulting `discord_thread_id`. A repeated identical completion is safe. `APPEND_MESSAGE` and summary updates that depend on a new thread remain unclaimable until the create action succeeds.
+Claim returns an array of actions, or `[]` when none are eligible. The action enum includes `CREATE_THREAD`, `APPEND_MESSAGE`, `UPSERT_SUMMARY`, and `RENAME_THREAD`; current projection/recovery producers do not emit `RENAME_THREAD`. Each action has a stable `action_id`; the bot should use it as its idempotency key when executing Discord operations. A `CREATE_THREAD` completion must include the resulting `discord_thread_id`. A repeated identical completion is safe. `APPEND_MESSAGE` and summary updates that depend on a new thread remain unclaimable until the create action succeeds. Pending/claimed actions for one topic are serialized, including backoff; different topics may proceed concurrently.
 
 Example action:
 
@@ -59,11 +63,16 @@ Example action:
     "source_created_at": "2026-11-04T09:00:00+07:00",
     "source_content": "Meta Hackathon nên làm gì?"
   },
-  "status": "CLAIMED"
+  "status": "CLAIMED",
+  "lease_token": "00000000-0000-4000-8000-000000000001"
 }
 ```
 
 The bot posts a clearly attributed copy and source link; Discord cannot move the original message into a thread.
+
+Claim has no top-level thread ID or lease deadline. Fetch the thread from `GET /topics/{topic_id}?guild_id=...` or the bot's persisted mapping; complete within the configured action lease (default 60 seconds). There is no lease-renewal endpoint. Preserve receipts for completed Discord operations before retrying ACKs; lease fencing does not guarantee exactly-once Discord effects.
+
+Claim is global to this backend: it has no guild/channel filter, and `worker_id` is an ownership label, not a guild authorization scope. Consumers sharing the backend must be able to route actions for every configured guild or use a dispatcher; the shared bot key is not a per-guild credential.
 
 ## Read topics and summaries
 
@@ -92,3 +101,19 @@ All topic reads require `guild_id`; cross-guild IDs return `404`. Message pagina
 - `422`: invalid JSON/schema, invalid timestamp, or missing thread ID on create completion.
 - `429`: rate limit reached; honor `Retry-After`.
 - `503`: corresponding API credential is not configured.
+
+## Moderator review (additive)
+
+Five administrator endpoints under `/api/v1/guilds/{guild_id}` use `X-Admin-API-Key`:
+
+- `GET /messages/{message_id}/review`: source text, association revision, job/call budget, latest decision/correction.
+- `POST /messages/{message_id}/corrections`: revision-checked assignment and full reviewed memory snapshots.
+- `GET /topics/{topic_id}/sync?limit=50&offset=0`: version, pause state and action history (limit 1–100).
+- `POST /topics/{topic_id}/resume-sync`: confirms external reconciliation against the latest topic version.
+- `POST /actions/{action_id}/recover`: audited resolution of DEAD or expired CLAIMED work.
+
+`message_id` here is the Discord message ID. `request_id` is required on every write and unique across review operations in a guild: identical retries return the original receipt, changed bodies return 409. `actor` is a moderator-supplied label under a shared admin key, not verified Discord user authentication. Missing/cross-guild resources return 404; stale revisions, live leases and superseded actions return 409; invalid sources/command fields return 422. All writes are transactional; no paid model call or direct Discord request occurs.
+
+See [manual review examples and reconciliation rules](MANUAL_REVIEW.md). Existing endpoints and fields remain. Action claim responses now add `lease_token`; clients must echo it in complete/fail for newly claimed actions (missing/stale token → 409). This is a required bot integration update; existing un-tokenized leases remain compatible until their next claim.
+
+Action lease fencing uses status, owner, expiry and per-claim token; reusing worker_id cannot authorize an ACK from an older claim.

@@ -35,6 +35,24 @@ _STOPWORDS = set(
     ]
 )
 _ALIASES = {"db": "database", "csdl": "database", "auth": "authentication"}
+# Retrieval hints only: broad domain synonyms must never decide topic identity.
+_PHRASE_ALIASES = {
+    "co so du lieu": "database",
+    "persistent storage engine": "database",
+    "storage engine": "database",
+    "data store": "database",
+    "datastore": "database",
+    "dang nhap": "login",
+    "sign in": "login",
+    "log in": "login",
+    "thanh toan": "payment",
+    "han chot": "deadline",
+}
+_PHRASE_PATTERN = re.compile(
+    r"\b("
+    + "|".join(re.escape(term) for term in sorted(_PHRASE_ALIASES, key=len, reverse=True))
+    + r")\b"
+)
 
 
 def normalize_text(value: str) -> str:
@@ -44,10 +62,12 @@ def normalize_text(value: str) -> str:
 
 
 def search_terms(value: str, limit: int = 24) -> list[str]:
+    if limit <= 0:
+        return []
     original = value[:8000]
     suggested = analyze_language(original).retrieval_text
     normalized = normalize_text(f"{suggested} {original}")
-    normalized = normalized.replace("co so du lieu", "database").replace("dang nhap", "login")
+    normalized = _PHRASE_PATTERN.sub(lambda match: _PHRASE_ALIASES[match[0]], normalized)
     return list(
         dict.fromkeys(
             _ALIASES.get(term, term) for term in normalized.split() if term not in _STOPWORDS
@@ -58,11 +78,11 @@ def search_terms(value: str, limit: int = 24) -> list[str]:
 def weighted_topic_terms(
     title: str, description: str, summary: dict[str, object]
 ) -> dict[str, float]:
-    texts = [(title, 3.0), (description, 1.5), (str(summary.get("overview", "")), 0.75)]
+    texts = [(title, 3.0), (description, 1.5), (str(summary.get("overview", ""))[-8000:], 0.75)]
     for field in ("proposals", "decisions", "open_questions", "action_items"):
         items = summary.get(field, [])
         if isinstance(items, list):
-            texts.append((" ".join(item for item in items[:20] if isinstance(item, str)), 0.75))
+            texts.append((" ".join(item for item in items[-20:] if isinstance(item, str)), 0.75))
     weights: dict[str, float] = {}
     for value, weight in texts:
         for term in search_terms(value, limit=300):

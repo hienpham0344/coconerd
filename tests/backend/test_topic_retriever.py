@@ -1,5 +1,7 @@
 from datetime import UTC, datetime
 
+import pytest
+
 from backend.application.contracts import TopicCandidate
 from backend.application.topic_retriever import retrieve_topic_candidates
 from backend.domain.entities import ConversationMessage
@@ -105,3 +107,58 @@ def test_retriever_compacts_candidate_context():
     assert len(compacted.summary["proposals"]) == 3
     assert len(compacted.summary["proposals"][0]) == 120
     assert "private_extra" not in compacted.summary
+
+
+@pytest.mark.parametrize(
+    "query,title",
+    [
+        ("persistent storage engine", "Cơ sở dữ liệu"),
+        ("sign in", "Đăng nhập"),
+        ("thanh toán", "Payment"),
+        ("hạn chót", "Deadline"),
+    ],
+)
+def test_bounded_domain_paraphrases_retrieve_older_candidate(query, title):
+    candidates = [_candidate(str(i), f"Unrelated {i}") for i in range(6)]
+    candidates.append(_candidate("gold", title))
+    ranked = retrieve_topic_candidates(_message(query), candidates)
+    assert ranked[0].id == "gold"
+
+
+def test_domain_expansion_keeps_project_and_platform_distinctions():
+    ranked = retrieve_topic_candidates(
+        _message("Atlas mobile sign in"),
+        [_candidate("other", "Boreal web login"), _candidate("gold", "Atlas mobile login")],
+    )
+    assert ranked[0].id == "gold"
+
+
+def test_compact_memory_exposes_newest_facts_within_existing_bounds():
+    recent = "Newest schedule: Friday"
+    candidate = _candidate(
+        "t",
+        "Atlas",
+        summary={
+            "overview": "Old background " * 50 + recent,
+            "decisions": [f"Fact {i}" for i in range(6)],
+        },
+    )
+    summary = retrieve_topic_candidates(_message("Atlas"), [candidate])[0].summary
+    assert recent in summary["overview"]
+    assert len(summary["overview"]) <= 400
+    assert summary["decisions"] == ["Fact 3", "Fact 4", "Fact 5"]
+
+
+def test_search_index_keeps_recent_facts_when_memory_grows():
+    from backend.application.topic_terms import weighted_topic_terms
+
+    terms = weighted_topic_terms(
+        "Atlas",
+        "",
+        {
+            "overview": "Earlier planning. " * 600 + "Nimbus milestone",
+            "decisions": [f"Previous item {i}" for i in range(25)] + ["Nebula rollout"],
+        },
+    )
+    assert "nebula" in terms
+    assert "nimbus" in terms

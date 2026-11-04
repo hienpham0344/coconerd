@@ -14,7 +14,15 @@ from backend.infrastructure.database.unit_of_work import SqlAlchemyUnitOfWork
 from backend.presentation.api.dependencies import ApiDependencies
 from backend.presentation.api.middleware import RequestBoundaryMiddleware
 from backend.presentation.api.rate_limit import rate_limit_dependency
-from backend.presentation.api.routers import actions, guilds, health, messages, model_config, topics
+from backend.presentation.api.routers import (
+    actions,
+    guilds,
+    health,
+    messages,
+    model_config,
+    reviews,
+    topics,
+)
 from backend.presentation.api.security import admin_key_dependency, bot_key_dependency
 
 
@@ -72,7 +80,7 @@ def create_app(
     dependencies = ApiDependencies(
         app_settings, get_uow, bot_dependencies, admin_dependencies, bot_auth, admin_auth
     )
-    for module in (health, messages, topics, actions, guilds, model_config):
+    for module in (health, messages, topics, actions, guilds, model_config, reviews):
         app.include_router(module.create_router(dependencies))
     return app
 

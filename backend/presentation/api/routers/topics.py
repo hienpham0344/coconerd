@@ -63,7 +63,7 @@ def create_router(dependencies: ApiDependencies) -> APIRouter:
     @router.get(
         "/api/v1/topics/{topic_id}/summary",
         tags=["topics"],
-        dependencies=[Depends(dependencies.bot_auth)],
+        dependencies=dependencies.bot,
     )
     async def get_topic_summary(
         topic_id: str,

@@ -1,5 +1,15 @@
 # Testing
 
+## Tiếp tục kiểm thử bot readiness — 2026-11-04
+
+- Chạy lại toàn bộ suite sau gián đoạn: `COCONERD_MODEL_API_KEY= .venv/bin/pytest -q --tb=short` → **250 passed, 71 warnings in 62.43s**. Warnings là Alembic `path_separator` và SQLAlchemy `Session.flush(objects=...)` deprecations.
+- Hai test còn đỏ đã được tái hiện trước khi sửa: key sai chứa Unicode gây `TypeError` thay vì 401; đọc summary bỏ qua rate limit (404 thay vì 429 khi quota đã hết). Đã so sánh credential dưới dạng UTF-8 bytes và dùng chung bot auth/rate-limit dependencies cho summary.
+- Các hồi quy từ task trước cũng qua: credential cấu hình rỗng bị chặn; action cùng topic được tuần tự hóa, topic khác vẫn xử lý được; API → DB migrate tạm → worker → bot giả lập, duplicate delivery đồng thời, memory replacement, retry/backoff, ACK lặp/lease token và giới hạn provider timeout/output truncation.
+- Ruff check, Ruff format check trên `backend tests scripts alembic` và `git diff --check` đều qua. Lần chạy trong sandbox không tiến triển; chạy ngoài sandbox hoàn tất. Nguyên nhân sâu của khác biệt môi trường chưa xác minh.
+- Smoke tiếng Việt tổng hợp: **4/4** khớp outcome/topic mong đợi, **3 Meta calls + 1 local**, không error/skipped. Bao gồm Telex đăng nhập web, `dr do` thiếu ngữ cảnh, code literal và phủ định trong reply. Usage quan sát: **4.646 input + 3.347 output = 7.993 tokens**; cached/reasoning đã nằm trong tổng tương ứng. Đây là smoke nhỏ có nhãn tác giả, không phải accuracy Discord thực tế.
+- Artifacts: [cases](evaluations/2026-11-04-resumed-language-cases.jsonl), [predictions](evaluations/2026-11-04-resumed-language-predictions.jsonl), [report và cấu hình/hash](evaluations/2026-11-04-resumed-language.json). Tối đa 4 call được cho phép; thực tế dùng 3, không retry.
+- Không migrate DB runtime, đăng nhập Discord hoặc khởi động dịch vụ nền. Còn cần thử bot thật với permission/thread, rate limit Discord, mất ACK sau side effect và chống lặp bằng `action_id`; kiểm thử tải/soak và dữ liệu Discord gán nhãn vẫn chưa thực hiện.
+
 The suite uses pytest, pytest-asyncio, HTTPX ASGI testing, and an isolated SQLite database. No Meta key or network call is required.
 
 ```bash
@@ -97,3 +107,46 @@ Sau khi người dùng yêu cầu triển khai DB, kiểm tra xác nhận `/home
 - `.venv/bin/alembic check` báo `No new upgrade operations detected`: schema đã khớp ORM hiện tại.
 - Kiểm tra tích hợp trên bản sao tạm của chính DB vừa tạo: bật guild/channel thử, POST cùng message hai lần đều trả 202, vẫn chỉ có một message/job; worker mock hoàn tất với `SUCCEEDED`, một topic/association/summary và hai outbox actions; đọc summary qua API trả 200.
 - Bản sao thử bật foreign keys; không gọi Meta. DB cấu hình thật giữ nguyên không có tin/topic/job/action tổng hợp. Không khởi động API/worker nền hoặc thiết lập bot Discord trong bước triển khai DB này.
+
+## Reliability v4 — 04/11/2026
+
+Fresh offline verification in the recovered checkout on `codex/topic-reliability`:
+
+- `.venv/bin/pytest -q --tb=short`: **231 passed, 65 warnings in 60.61s**. Tests include policy/reducer/projection, HTTP review/correction, source/guild/revision guards, idempotency, paused sync, audited recovery, real SQLite rollback, lease theft and stale ACK after reclaim with the same bot worker ID.
+- Migration tests upgrade a legacy disposable database to `20261104_0003`, validate alias backfill and review fields, downgrade/re-upgrade, preserve old topic data and check SQLite integrity. No runtime database was migrated.
+- OpenAPI snapshot covers five new review endpoints and the `lease_token` addition to action claim/ACK/fail. Existing fields and routes remain; bot clients must echo the claim token for newly issued leases.
+- Ruff lint/format, architecture tests, `git diff --check` and local documentation links checked. No new runtime dependency or lockfile change.
+
+Warnings: 6 Alembic `path_separator` deprecations and 59 SQLAlchemy `Session.flush(objects=...)` deprecations from existing code. These are not failing tests. A test process ended with code 143 during the run; it was not counted as verification. The subsequent complete 231-test run above finished with exit code 0.
+
+The full run initially exposed three outdated query-test expectations after adding review audit deletion and terminal cleanup; they were updated while retaining guild/order/filter assertions. The final review also reproduced an actual same-worker stale-ACK bug (200 instead of 409), then added per-claim lease tokens and verified the regression.
+
+This was an author self-review; no independent reviewer/subagent was available. Offline correctness does not establish Meta v4 accuracy, production throughput, Discord permissions or exactly-once side effects. No paid model call, bot login or long-lived deployment was performed during that offline reliability run. Existing live v3 reports remain historical; they were not overwritten or relabeled as v4 results. See the subsequent authorized live checks below, [readiness assessment](BACKEND_READINESS.md) and [manual review integration](MANUAL_REVIEW.md).
+
+## Meta v4 live: phân loại và sửa memory — 04/11/2026
+
+Kiểm tra sau đợt reliability, được người dùng cho phép. Dùng Meta-only, model yêu cầu `muse-spark-1.3`, prompt/cache `coconerd-topic-classification-v4-memory-v1`, không SDK retry, không dùng chat Discord thật. Dữ liệu là snapshot tổng hợp có nhãn do người triển khai đặt, không phải benchmark độc lập.
+
+**Lượt chính — effort `low`, tối đa 2.048 output tokens mỗi call:** 9 ca, 7 lượt gọi Meta và 2 ca xử lý local. Có 8 ca hoàn tất, khớp cả outcome/topic ID mong đợi; ca sửa memory thất bại với `MetaOutputTruncatedError`. Không có gán nhầm topic trong các kết quả đã hoàn tất.
+
+| Ca | Quan sát |
+| --- | --- |
+| Mở dashboard mới | `new` |
+| Login mobile, có topic web cạnh tranh | `existing`, đúng `dev-login` |
+| Viết tắt DB | `existing`, đúng `dev-db` |
+| `ok` không có tham chiếu | `defer`, local, zero tokens |
+| Reply nhưng chuyển sang tuyển người thiết kế logo | `new` |
+| Một tin nói lịch beta và lỗi login | `defer` |
+| `đồng ý` có clarification | `existing`, đúng `dev-beta` |
+| Tin trống | `irrelevant`, local, zero tokens |
+| Dời lịch và thêm người phụ trách | Output bị cắt; chưa có decision hợp lệ |
+
+**Một lượt chẩn đoán riêng — effort `minimal`, vẫn 2.048 output tokens:** cùng ca memory trả JSON hợp lệ, đúng `v4-atlas`. Model đề xuất replacements có quote đúng cho overview và decisions. Reducer giữ Lan phụ trách QA, bỏ lịch thứ Năm, thêm lịch thứ Sáu và Thanh phụ trách API; 7 kiểm tra trạng thái memory đều đạt, snapshot cũ không bị mutate. Overview vẫn lặp ý lịch mới bằng hai cách diễn đạt: chỉ chống trùng chuỗi chính xác, chưa chống trùng theo nghĩa. Một ca thành công chưa đủ để đổi effort mặc định hoặc kết luận `minimal` tốt hơn trên mọi ca; mặc định vẫn là `low`.
+
+Tổng cộng có 8 lượt gọi nhận được phản hồi: 7 kết quả hợp lệ và 1 bị cắt. Trước đó, một lần chạy trong môi trường hạn chế bị dừng khi chưa ghi được prediction; không xác minh được request đã gửi hay usage của lần đó. Các lượt có kết quả chạy được ngoài môi trường hạn chế, nhưng nguyên nhân chi tiết của lần treo chưa được xác minh.
+
+Usage đã lưu ở lượt chính: 7.762 input + 6.679 output = 14.441 tokens. Lượt chẩn đoán: 1.308 input + 1.462 output = 2.770 tokens. **17.211 là số tokens quan sát được từ kết quả hợp lệ, không phải tổng chi phí đầy đủ**: runner hiện không giữ usage của exception bị cắt, và lần bị gián đoạn có usage không rõ. Cached input và reasoning đã nằm trong các tổng tương ứng, không cộng thêm. Cần lưu usage cả khi lỗi trước khi báo cáo chi phí đầy đủ.
+
+Không ghi DB runtime, không migrate, không gọi Discord hoặc kiểm tra outbox trong lượt live này. Memory được kiểm tra bằng reducer trên kết quả Meta thật; persistence vẫn dựa vào integration tests offline đã ghi ở trên. 8/9 chỉ là mức hoàn tất/khớp nhãn của nhóm ca nhỏ này, **không phải accuracy trên Discord thực tế**. Không trộn lượt chẩn đoán khác effort vào điểm lượt chính.
+
+Artifacts: [input snapshots](evaluations/2026-11-04-v4-meta-cases.jsonl), [predictions chính](evaluations/2026-11-04-v4-meta-predictions.jsonl), [báo cáo chính](evaluations/2026-11-04-v4-meta.json), [prediction memory minimal](evaluations/2026-11-04-v4-meta-memory-minimal-predictions.jsonl), [báo cáo memory minimal](evaluations/2026-11-04-v4-meta-memory-minimal.json). Báo cáo có version/config và hash fixture; đã chấm lại predictions offline mà không gọi thêm API.

@@ -2,6 +2,7 @@
 
 from datetime import UTC, datetime
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -132,6 +133,7 @@ async def test_processing_writes_new_topic_decision_summary_and_actions_atomical
             last_activity_at=topic.last_activity_at,
             version=1,
             discord_thread_id=None,
+            sync_paused=False,
         )
 
     async def add_action(
@@ -269,7 +271,7 @@ async def test_processing_persists_nonempty_retrieved_candidate_ids(monkeypatch)
             add_decision=add_decision,
         ),
         topics=SimpleNamespace(candidates=candidates, search=_empty_recent),
-        summaries=SimpleNamespace(latest=none),
+        summaries=SimpleNamespace(latest=none, latest_many=AsyncMock(return_value={})),
     )
     result = await process_message_record(uow, "record-1", FakeProvider())
 

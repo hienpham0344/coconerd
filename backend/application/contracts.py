@@ -2,7 +2,7 @@ from collections.abc import Sequence
 from datetime import datetime
 from typing import Literal, Protocol
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from backend.application.read_models import ContextMessage
 from backend.domain.entities import ConversationMessage
@@ -17,6 +17,15 @@ class TopicCandidate(BaseModel):
     evidence: str = ""
 
 
+class MemoryReplacement(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    field: Literal["overview", "proposals", "decisions", "open_questions", "action_items"]
+    previous: str = Field(min_length=1, max_length=2000)
+    replacement: str | None = Field(default=None, max_length=2000)
+    quote: str = Field(min_length=1, max_length=1000)
+
+
 class TopicDecision(BaseModel):
     outcome: Literal["new", "existing", "defer", "irrelevant"]
     topic_id: str | None = None
@@ -29,6 +38,7 @@ class TopicDecision(BaseModel):
     open_questions: list[str] = Field(default_factory=list)
     action_items: list[str] = Field(default_factory=list)
     summary: str = ""
+    memory_replacements: list[MemoryReplacement] = Field(default_factory=list, max_length=10)
     evidence_message_ids: list[str] = Field(default_factory=list, max_length=7)
     defer_reason: (
         Literal[
@@ -53,7 +63,7 @@ class ClassificationResult(BaseModel):
     cached_tokens: int | None = None
     reasoning_tokens: int | None = None
     latency_ms: int
-    policy_version: str = "topic-policy-v3"
+    policy_version: str = "topic-policy-v4"
     model_calls: int = 1
     language_hints: dict[str, object] = Field(default_factory=dict)
 

@@ -50,7 +50,7 @@ async def test_clarification_wakes_once_even_when_already_ingested(database_fact
         job = await jobs.claim_one("w", 60)
         if early:
             followup = await store(session, msg("clarify", "ý mình là lịch beta", at=now))
-        await jobs.wait_for_context(job.id, now + timedelta(minutes=10))
+        await jobs.wait_for_context(job.id, now + timedelta(minutes=10), owner="w")
         if not early:
             followup = await store(session, msg("clarify", "ý mình là lịch beta", at=now))
             await jobs.wake_deferred(followup.id)
@@ -83,7 +83,7 @@ async def test_unrelated_message_cannot_wake_deferred(database_factory, override
         await store(session, msg("root", at=now - timedelta(seconds=5)))
         jobs = JobRepository(session)
         job = await jobs.claim_one("w", 60)
-        await jobs.wait_for_context(job.id, now + timedelta(minutes=10))
+        await jobs.wait_for_context(job.id, now + timedelta(minutes=10), owner="w")
         fields = {"content": "ý mình là lịch beta", **override}
         followup = await store(session, msg("followup", at=now, **fields))
         await jobs.wake_deferred(followup.id)
@@ -97,7 +97,7 @@ async def test_expiry_does_not_queue_a_model_call(database_factory):
         await store(session, msg("root"))
         jobs = JobRepository(session)
         job = await jobs.claim_one("w", 60)
-        await jobs.wait_for_context(job.id, datetime.now(UTC) - timedelta(seconds=1))
+        await jobs.wait_for_context(job.id, datetime.now(UTC) - timedelta(seconds=1), owner="w")
         await session.commit()
         assert await jobs.claim_one("w", 60) is None
         await session.refresh(job)
@@ -114,7 +114,7 @@ async def test_clarification_reply_to_another_message_never_wakes_target(databas
         followup_message = msg("clarify", "ý mình là lịch beta", reply="another", at=now)
         if early:
             await store(session, followup_message)
-        await jobs.wait_for_context(job.id, now + timedelta(minutes=10))
+        await jobs.wait_for_context(job.id, now + timedelta(minutes=10), owner="w")
         if not early:
             followup = await store(session, followup_message)
             await jobs.wake_deferred(followup.id)
@@ -136,7 +136,7 @@ async def test_implicit_clarification_does_not_skip_newer_message_from_same_auth
         await store(session, msg("newer", "another subject", at=now - timedelta(seconds=5)))
         if early:
             await store(session, msg("clarify", "ý mình là lịch beta", at=now))
-        await jobs.wait_for_context(job.id, now + timedelta(minutes=10))
+        await jobs.wait_for_context(job.id, now + timedelta(minutes=10), owner="w")
         if not early:
             followup = await store(session, msg("clarify", "ý mình là lịch beta", at=now))
             await jobs.wake_deferred(followup.id)

@@ -10,7 +10,7 @@ from backend.domain.enums import JobStatus
 
 
 async def complete_job(
-    uow: UnitOfWork, job_id: str, result: ProcessingResult | None = None
+    uow: UnitOfWork, job_id: str, result: ProcessingResult | None = None, *, owner: str
 ) -> None:
     waiting = False
     if (
@@ -19,10 +19,10 @@ async def complete_job(
         and result.defer_reason in {"missing_context", "ambiguous"}
     ):
         waiting = await uow.jobs.wait_for_context(
-            job_id, datetime.now(UTC) + timedelta(seconds=DEFER_WINDOW_SECONDS)
+            job_id, datetime.now(UTC) + timedelta(seconds=DEFER_WINDOW_SECONDS), owner=owner
         )
     if not waiting:
-        await uow.jobs.complete(job_id)
+        await uow.jobs.complete(job_id, owner=owner)
     await uow.commit()
 
 
@@ -34,7 +34,7 @@ async def claim_job(uow: UnitOfWork, owner: str, lease_seconds: int) -> ClaimedJ
 
 
 async def fail_job(
-    uow: UnitOfWork, job_id: str, error_type: str, *, retryable: bool = True
+    uow: UnitOfWork, job_id: str, error_type: str, *, owner: str, retryable: bool = True
 ) -> None:
     job = await uow.jobs.get_state(job_id)
     if job is None:
@@ -46,6 +46,6 @@ async def fail_job(
         else JobStatus.DEAD
     )
     await uow.jobs.record_failure(
-        job_id, status.value, datetime.now(UTC) + timedelta(seconds=delay), error_type
+        job_id, status.value, datetime.now(UTC) + timedelta(seconds=delay), error_type, owner=owner
     )
     await uow.commit()

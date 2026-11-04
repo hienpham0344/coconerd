@@ -47,6 +47,30 @@ _DECISION_PROPERTIES: dict[str, Any] = {
         "maxItems": 20,
     },
     "summary": {"type": "string", "maxLength": 2000},
+    "memory_replacements": {
+        "type": "array",
+        "maxItems": 10,
+        "items": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["field", "previous", "replacement", "quote"],
+            "properties": {
+                "field": {
+                    "type": "string",
+                    "enum": [
+                        "overview",
+                        "proposals",
+                        "decisions",
+                        "open_questions",
+                        "action_items",
+                    ],
+                },
+                "previous": {"type": "string", "minLength": 1, "maxLength": 2000},
+                "replacement": {"anyOf": [{"type": "string", "maxLength": 2000}, {"type": "null"}]},
+                "quote": {"type": "string", "minLength": 1, "maxLength": 1000},
+            },
+        },
+    },
     "evidence_message_ids": {
         "type": "array",
         "items": {"type": "string", "maxLength": 100},
@@ -70,7 +94,7 @@ _DECISION_PROPERTIES: dict[str, Any] = {
     },
     "multiple_topics": {"type": "boolean"},
 }
-_PROMPT_CACHE_KEY = "coconerd-topic-classification-v3-language-v2"
+_PROMPT_CACHE_KEY = "coconerd-topic-classification-v4-memory-v1"
 
 
 def _topic_decision_response_format() -> dict[str, Any]:
@@ -312,7 +336,7 @@ class MockMetaProvider(ModelProvider):
                     outcome="new",
                     title=title,
                     description=message.content,
-                    confidence=0.5,
+                    confidence=0.8,
                     reason="mock provider has no prior candidate topics",
                     summary=message.content,
                 )

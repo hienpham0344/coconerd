@@ -35,199 +35,132 @@ coconerd/
 
 Kiểm tra website bằng `npm test` và `npm run build` trong `web/`; kiểm tra backend bằng `python -m pytest -q` từ gốc repo. Bridge nội bộ tùy chọn có test riêng: `cd web && npm run test:bridge`. Không đưa `.env`, `node_modules`, build output, cache hoặc database vào Git.
 
-## Nội dung
+## Bắt đầu từ đâu?
 
-- [Website công khai](#website-công-khai)
-- [Chạy nhanh](#chạy-nhanh)
-- [Tính năng](#tính-năng)
-- [Cấu trúc backend và lưu trữ](#cấu-trúc-backend-và-lưu-trữ)
-- [Tích hợp bot](#tích-hợp-bot)
-- [Cấu hình](#cấu-hình)
-- [API chính](#api-chính)
-- [Kiểm tra và đánh giá](#kiểm-tra-và-đánh-giá)
-- [Tài liệu](#tài-liệu)
-- [Lưu ý triển khai](#lưu-ý-triển-khai)
+- **Cài backend, tạo DB, chạy API/worker:** [Setup backend và database](docs/BACKEND_SETUP.md).
+- **Gắn bot vào backend:** [Hướng dẫn tích hợp Discord bot](docs/BOT_INTEGRATION.md).
+- **Tra JSON, endpoint và lỗi:** [API contract](docs/API_CONTRACT.md); khi API chạy, mở [Swagger UI](http://127.0.0.1:8000/docs).
+- **Đọc code hoặc mở rộng:** [Kiến trúc và trách nhiệm module](docs/BACKEND_ARCHITECTURE.md).
 
-## Chạy nhanh
+## Chạy local
 
-**Yêu cầu:** Python 3.12 trở lên. Cần Meta Model API key để chạy model thật; mock mode chạy offline.
+Yêu cầu Python **3.12+**, Git; các ví dụ HTTP dùng `curl`. Chạy lệnh tại thư mục gốc checkout:
 
 ```bash
 python3.12 -m venv .venv
 source .venv/bin/activate
-python -m pip install --upgrade pip
 python -m pip install -e '.[dev]'
-cp .env.example .env
+if [ ! -f .env ]; then cp .env.example .env; fi
 ```
 
-Trong `.env`, đặt hai giá trị ngẫu nhiên, riêng biệt cho `COCONERD_BOT_API_KEY` và `COCONERD_ADMIN_API_KEY`. Chỉnh `COCONERD_MODEL_API_KEY` nếu dùng model thật. Không commit `.env`.
-
-Khởi tạo database và chạy API:
+Sửa `.env`: đặt hai key ngẫu nhiên, khác nhau cho `COCONERD_BOT_API_KEY` và `COCONERD_ADMIN_API_KEY`. Để kiểm tra luồng offline, giữ `COCONERD_MOCK_LLM=true`, `COCONERD_APP_ENV=development`. File mẫu không chứa credential thật; không commit `.env`.
 
 ```bash
+mkdir -p data
 alembic upgrade head
+alembic current
 organizer-api
 ```
 
-Mở terminal khác để chạy worker:
+Terminal thứ hai, **cùng checkout**:
 
 ```bash
 source .venv/bin/activate
 organizer-worker
 ```
 
-API mặc định ở `http://localhost:8000`; Swagger UI ở `/docs`, OpenAPI JSON ở `/openapi.json`. API trả `202 Accepted` sau khi message và job đã commit; worker xử lý message sau đó.
-
-### Chạy offline bằng mock
-
-Trong `.env` đặt:
-
-```dotenv
-COCONERD_APP_ENV=development
-COCONERD_MOCK_LLM=true
-```
-
-Mock chỉ chạy trong môi trường `development` hoặc `test`. Nó giúp kiểm thử luồng tích hợp, không mô phỏng chất lượng Meta và không tạo kết quả benchmark.
-
-## Tính năng
-
-- **Ingest bền vững:** lưu message và job trong cùng transaction; delivery trùng không tạo bản ghi hoặc job mới.
-- **Phân nhóm theo topic:** dùng model để chọn topic hiện có, tạo topic mới, defer trường hợp chưa chắc chắn hoặc bỏ qua nội dung không liên quan.
-- **Tìm lại topic cũ:** chỉ mục từ khóa trong SQLite, chuẩn hóa dấu và alias; không giới hạn tìm kiếm ở 30 topic gần nhất.
-- **Chờ ngữ cảnh:** tin thiếu ngữ cảnh được xét lại tối đa một lần khi có lời giải thích phù hợp; giới hạn hai lượt gọi model cho mỗi message, kể cả lượt lỗi.
-- **Memory và summary:** lưu association, episode và các phiên bản summary theo topic.
-- **Outbox cho Discord:** ghi action cùng transaction với cập nhật topic; bot claim, thực thi và ACK action qua API.
-- **Vận hành an toàn hơn:** API key riêng cho bot/admin, allowlist guild/channel, rate limit, giới hạn request, retry có giới hạn và retention dữ liệu.
-
-## Cấu trúc backend và lưu trữ
-
-Backend là một ứng dụng chia theo nghiệp vụ: `messages`, `topics`, `actions`, `guilds`, `model_config` và `health`. HTTP và worker gọi cùng lớp use case; persistence được truy cập qua repository và Unit of Work.
-
-```text
-backend/
-├── domain/                         # Entity và quy tắc vòng đời topic
-├── application/
-│   ├── services/                   # Use case theo nghiệp vụ
-│   ├── ports/persistence.py        # Interface repository và Unit of Work
-│   └── read_models.py              # DTO độc lập với database/HTTP
-├── infrastructure/database/
-│   ├── repositories/              # SQL và ánh xạ ORM → DTO
-│   ├── unit_of_work.py             # Quản lý transaction
-│   └── models.py                   # Schema SQLAlchemy
-├── presentation/api/
-│   ├── routers/                   # Endpoint theo nghiệp vụ
-│   └── app.py                     # Khởi tạo API và ghép router
-└── worker.py                      # Vòng lặp xử lý job và lịch bảo trì
-```
-
-**API:** chạy bằng `organizer-api`, mặc định ở `http://localhost:8000`; xem endpoint tại `/docs`. **Database:** SQLite mặc định ở `data/coconerd.db`, tính từ thư mục chạy lệnh. `alembic upgrade head` tạo/cập nhật bảng. API và worker phải dùng cùng `COCONERD_DATABASE_URL` để cùng đọc message, job, topic và action; restart tiến trình không xóa dữ liệu.
-
-Xem [kiến trúc backend](docs/BACKEND_ARCHITECTURE.md) để tra module, transaction và cách mở rộng nghiệp vụ.
-
-## Tích hợp bot
-
-1. Admin bật guild và allowlist channel bằng `PUT /api/v1/admin/guilds/{guild_id}/settings`.
-2. Bot gửi message đến `POST /api/v1/messages` với header `X-API-Key`. Gửi Discord message ID, guild/channel, tác giả, nội dung và timestamp có timezone; reply có thể kèm `reply_to_message_id`.
-3. Backend lưu message/job và trả `202`; bot không phải chờ model phân loại.
-4. Worker chọn ngữ cảnh giới hạn từ các message trước đó cùng guild/kênh (ưu tiên chuỗi reply), phân loại từng message riêng và ghi action cần thực hiện vào outbox.
-5. Bot định kỳ gọi `POST /api/v1/actions/claim`, thực thi action bằng Discord API rồi báo kết quả qua `/complete` hoặc `/fail`.
-6. Bot có thể đọc topic, message và summary để hỗ trợ giao diện riêng.
-
-**Xử lý lặp:** dùng `action_id` làm idempotency key. Action phụ thuộc vào việc tạo thread chỉ được claim sau khi action tạo thread thành công. Payload có thể chứa bản sao message nguồn; bot nên ghi tên tác giả, thời gian và liên kết về message gốc. Discord không thể chuyển message gốc vào thread.
-
-Bot nên gửi từng message gốc ngay khi nhận được và thử lại với cùng `message_id` nếu chưa thấy `202`. Server tự chọn tối đa 6 message ngữ cảnh (chuỗi reply tối đa 3 cấp, phần còn lại trong 10 phút gần nhất), giới hạn 400 ký tự/message và 1.600 ký tự tổng. Các message lân cận có thể thuộc chủ đề khác; AI chỉ quyết định cho message hiện tại. API hiện nhận một message/request và tính rate limit theo từng request; chưa có HTTP batch hay cơ chế chờ gom message.
-
-## Cấu hình
-
-Backend ưu tiên biến `COCONERD_*`; một số tên cũ vẫn được nhận để tương thích. `.env.example` giữ cấu hình mẫu có sẵn của workspace và bổ sung các biến cho backend này.
-
-<details>
-<summary>Hiện cấu hình và giá trị mặc định</summary>
-
-| Biến | Mặc định | Mục đích |
-| --- | --- | --- |
-| `COCONERD_APP_ENV` | `development` | Mock chỉ khả dụng ở `development`/`test` |
-| `COCONERD_HOST` / `COCONERD_PORT` | `0.0.0.0` / `8000` | Địa chỉ API bind |
-| `COCONERD_DATABASE_URL` | `sqlite+aiosqlite:///./data/coconerd.db` | SQLite async database |
-| `COCONERD_BOT_API_KEY` | Chưa đặt | Key riêng cho API bot |
-| `COCONERD_ADMIN_API_KEY` | Chưa đặt | Key riêng cho API admin |
-| `COCONERD_MODEL_API_KEY` | Chưa đặt | Credential gọi Meta Model API |
-| `COCONERD_META_API_BASE` | `https://api.meta.ai/v1` | API base URL |
-| `COCONERD_META_MODEL_NAME` | `muse-spark-1.3` | Model ID mặc định |
-| `COCONERD_MOCK_LLM` | `false` | Bật provider mock khi phát triển/kiểm thử |
-| `COCONERD_WORKER_POLL_SECONDS` | `1` | Thời gian chờ khi không có job |
-| `COCONERD_WORKER_LEASE_SECONDS` | `60` | Thời hạn lease cho job |
-| `COCONERD_WORKER_MAX_ATTEMPTS` | `5` | Số lần xử lý job tối đa |
-| `COCONERD_ACTION_LEASE_SECONDS` | `60` | Thời hạn bot giữ action |
-| `COCONERD_MAX_REQUEST_BYTES` | `65536` | Giới hạn kích thước request |
-| `COCONERD_MAX_MESSAGE_LENGTH` | `8000` | Giới hạn nội dung một message |
-| `COCONERD_RETENTION_DAYS` | `365` | Retention mặc định cho guild |
-| `COCONERD_TOPIC_DORMANT_AFTER_DAYS` | `30` | Số ngày trước khi topic inactive thành dormant |
-
-Các biến `LLM_TEMPERATURE`, `LLM_MAX_TOKENS`, `COCONERD_CORS_ORIGINS` và `COCONERD_LOG_LEVEL` được mô tả trong [cấu hình model](docs/MODEL_CONFIGURATION.md) và file mẫu.
-
-</details>
-
-## API chính
-
-Bot dùng `X-API-Key`; admin dùng key riêng `X-Admin-API-Key`. Topic read luôn cần `guild_id`; ID thuộc guild khác trả `404`.
-
-<details>
-<summary>Hiện danh sách endpoint chính</summary>
-
-| Method | Path | Quyền | Mục đích |
-| --- | --- | --- | --- |
-| `POST` | `/api/v1/messages` | Bot | Ingest message và enqueue job |
-| `POST` | `/api/v1/actions/claim` | Bot | Claim action sẵn sàng xử lý |
-| `POST` | `/api/v1/actions/{action_id}/complete` | Bot | ACK action thành công |
-| `POST` | `/api/v1/actions/{action_id}/fail` | Bot | Báo lỗi để retry hoặc kết thúc action |
-| `GET` | `/api/v1/topics/{topic_id}` | Bot | Đọc topic trong guild |
-| `GET` | `/api/v1/topics/{topic_id}/messages` | Bot | Đọc message theo trang |
-| `GET` | `/api/v1/topics/{topic_id}/summary` | Bot | Đọc summary mới nhất |
-| `PUT` | `/api/v1/admin/guilds/{guild_id}/settings` | Admin | Cấu hình guild, channel allowlist, retention |
-| `PUT` / `GET` | `/api/v1/admin/model-config` | Admin | Cấu hình model toàn cục hoặc theo guild |
-| `POST` | `/api/v1/admin/topics/{topic_id}/close` | Admin | Đóng topic rõ ràng |
-| `GET` | `/api/v1/health` | Public | Kiểm tra database và heartbeat worker |
-
-</details>
-
-Request/response, headers, rate limit và mã lỗi được mô tả trong [API contract](docs/API_CONTRACT.md). Các endpoint admin khác gồm đóng/xóa topic và xóa dữ liệu guild.
-
-## Kiểm tra và đánh giá
+Terminal thứ ba:
 
 ```bash
-pytest
+curl --fail-with-body --silent --show-error http://127.0.0.1:8000/api/v1/health
+```
+
+Khi API kết nối DB và worker có heartbeat, kết quả là `{"status":"ok","database":"ok","worker":"ok"}`. Health có thể trả HTTP 200 với `status=degraded`; cần đọc JSON. Tiếp theo [bật guild/channel và gửi message thử](docs/BACKEND_SETUP.md#5-bật-guildchannel-và-gửi-message-thử).
+
+Muốn dùng Meta thật: đặt `COCONERD_MODEL_API_KEY`, đổi `COCONERD_MOCK_LLM=false`, restart worker. Cấu hình mặc định: `muse-spark-1.3`, effort `low`, tối đa 2.048 output tokens/call. Xem [cấu hình model](docs/MODEL_CONFIGURATION.md), gồm override theo guild.
+
+## Cấu trúc repository
+
+```text
+.
+├── backend/
+│   ├── domain/                     # Entity, enum, vòng đời topic
+│   ├── application/
+│   │   ├── services/               # Ingest, topic, action, review, job
+│   │   ├── ports/                  # Hợp đồng persistence/review
+│   │   ├── data/                   # Dữ liệu chuẩn hóa ngôn ngữ
+│   │   ├── agent_workflow.py       # Điều phối phân loại và evidence
+│   │   └── topic_memory.py         # Gộp/sửa facts trong memory
+│   ├── infrastructure/
+│   │   ├── database/               # ORM, repository, Unit of Work
+│   │   └── meta_provider.py        # Adapter Meta và mock
+│   ├── presentation/api/           # FastAPI, auth, schema, router
+│   ├── config.py                   # Đọc cấu hình từ environment/.env
+│   └── worker.py                   # Job polling, retry, maintenance
+├── bot/                           # Discord bot và slash commands
+├── web/                           # Website React và server Node.js
+├── alembic/versions/               # Migration có version
+├── data/                          # SQLite runtime, không commit DB
+├── docs/                          # Setup, tích hợp, kiến trúc, đánh giá
+├── scripts/                       # CLI đánh giá agent/grouping
+├── tests/backend/                 # Unit, repository, API, integration
+├── tests/fixtures/evaluation/      # Hội thoại tổng hợp có nhãn
+├── .env.example                   # Mẫu cấu hình
+└── pyproject.toml                 # Dependency, entrypoint, pytest, Ruff
+```
+
+Router gọi application service; service dùng port/DTO; infrastructure triển khai SQL và transaction. API và worker dùng chung nghiệp vụ, cùng DB. Các ranh giới này được kiểm tra bằng `tests/backend/test_architecture.py`; xem [kiến trúc](docs/BACKEND_ARCHITECTURE.md) và [schema](docs/DATA_SCHEMA.md).
+
+## Những việc backend xử lý
+
+- Lưu message/job cùng transaction, chống delivery trùng theo `(guild_id, message_id)`.
+- Tìm topic cũ trong cùng guild bằng chỉ mục local, gửi tối đa 5 ứng viên cho model.
+- Kết quả `new`, `existing`, `defer` hoặc `irrelevant`; giữ tối đa 6 message ngữ cảnh/1.600 ký tự.
+- Memory có phiên bản; thay/xóa fact cần tham chiếu fact cũ và quote nguồn hợp lệ.
+- Chờ clarification và xét lại tối đa một lần; tối đa hai reservation gọi model/message qua mọi retry.
+- Outbox có lease/token, retry/backoff; action cùng topic được xử lý tuần tự.
+- Admin review/correction có revision, audit, pause/resume sync và recovery.
+
+## Hợp đồng cần thống nhất với bot
+
+1. Admin bật guild và allowlist channel bằng key admin.
+2. Bot gửi từng message gốc đến `POST /api/v1/messages` với `X-API-Key`.
+3. `202` xác nhận đã lưu; worker phân loại sau đó. `defer`/`irrelevant` có thể không sinh action.
+4. Bot poll `POST /api/v1/actions/claim`, thực hiện action, rồi `/complete` hoặc `/fail` với đúng `worker_id` và `lease_token`.
+5. Bot lưu bền vững `action_id → kết quả Discord`, `topic_id → thread_id` và ID message summary; retry không tạo thêm side effect đã hoàn tất.
+
+**Backend không gửi Discord request.** Bot tự xử lý quyền, Discord rate limit, định dạng nội dung và chống vòng lặp ingest message do chính bot gửi. Ví dụ đầy đủ, lease và checklist pilot nằm trong [BOT_INTEGRATION.md](docs/BOT_INTEGRATION.md).
+
+## Cấu hình thiết yếu
+
+| Biến | Vai trò |
+| --- | --- |
+| `COCONERD_DATABASE_URL` | Mặc định `sqlite+aiosqlite:///./data/coconerd.db` |
+| `COCONERD_BOT_API_KEY` | Key backend dành cho bot, khác Discord token |
+| `COCONERD_ADMIN_API_KEY` | Key cấu hình/review; giữ ở phía quản trị |
+| `COCONERD_MOCK_LLM` | Code mặc định `false`; file mẫu đặt `true` để chạy offline |
+| `COCONERD_MODEL_API_KEY` | Key Meta khi tắt mock |
+| `COCONERD_HOST` / `COCONERD_PORT` | Mặc định `0.0.0.0:8000`; local có thể bind `127.0.0.1` |
+| `COCONERD_ACTION_LEASE_SECONDS` | Mặc định 60 giây để bot thực thi và ACK |
+
+`Settings` đọc `.env` theo **thư mục chạy lệnh**. Environment có độ ưu tiên cao hơn, kể cả giá trị rỗng. API, worker và Alembic cần cùng checkout/DB URL; `.env` không tự được export vào shell. Tra toàn bộ mẫu tại [.env.example](.env.example).
+
+## Kiểm tra
+
+```bash
+pytest -q --tb=short
 ruff check backend tests scripts alembic
 ruff format --check backend tests scripts alembic
 ```
 
-Suite dùng SQLite cục bộ và provider mock, không gọi Meta API có tính phí. Fixture trong `tests/fixtures/evaluation/` là dữ liệu tổng hợp nhỏ, không đại diện benchmark. Cách chạy metric trên prediction xem [tài liệu kiểm thử](docs/TESTING.md).
+Suite offline không gọi Meta/Discord thật. Mốc kiểm chứng ngày 2026-11-04: **250 test passed**; test tích hợp dùng DB migrate tạm và bot giả lập. Đây không phải bảo đảm accuracy, tải production hoặc tích hợp Discord thực tế. Xem [kết quả và giới hạn kiểm thử](docs/TESTING.md).
 
-## Phân loại topic
+## Tài liệu và vận hành
 
-Backend hợp nhất tối đa 30 topic từ chỉ mục tìm kiếm với 30 topic gần đây trong cùng guild, xếp hạng cục bộ và gửi tối đa 5 topic gọn cho Meta. Topic cũ còn mở vẫn có thể được tìm thấy. Context giới hạn 6 tin/1.600 ký tự; reply và lời giải thích được ưu tiên, nhưng không tự động chứng minh cùng topic.
+- [Setup backend/DB](docs/BACKEND_SETUP.md): môi trường, migration, backup, health và xử lý lỗi.
+- [Tích hợp bot](docs/BOT_INTEGRATION.md) · [API contract](docs/API_CONTRACT.md).
+- [Kiến trúc](docs/BACKEND_ARCHITECTURE.md) · [Schema dữ liệu](docs/DATA_SCHEMA.md).
+- [Agent workflow](docs/AGENT_WORKFLOW.md) · [Model configuration](docs/MODEL_CONFIGURATION.md).
+- [Manual review](docs/MANUAL_REVIEW.md) · [Readiness và hạn chế](docs/BACKEND_READINESS.md).
 
-Policy `topic-policy-v3` yêu cầu evidence chứa ID tin gốc, chỉ dùng ID đã cung cấp và topic nằm trong shortlist. Input nhiều chủ đề được `defer`; title trùng không tự ép gộp. Backend kiểm tra lại trạng thái topic trước khi ghi association/summary/action. Kiểm tra ID không chứng minh model hiểu đúng nghĩa; confidence chưa được hiệu chỉnh thành xác suất đúng.
-
-Tin rỗng thành `irrelevant`; câu xác nhận như `ok` không có điểm tham chiếu thành `defer`, đều không gọi Meta. Tin `defer` vì thiếu ngữ cảnh hoặc mơ hồ có thể chờ lời giải thích cùng channel trong 10 phút và xét lại một lần. Association đã gán topic không tự đổi. Mỗi message được đặt chỗ tối đa hai lượt gọi model qua mọi lần retry; lỗi hoặc crash sau đặt chỗ vẫn có thể tiêu hao hạn mức.
-
-Mặc định dùng `COCONERD_LLM_REASONING_EFFORT=low` và `COCONERD_LLM_MAX_TOKENS=2048`. Prompt có tiền tố/cache key theo phiên bản; token thiếu thông tin giữ giá trị chưa biết. Tools là các hàm đọc dữ liệu do code điều phối, chưa thêm model subagent hoặc vector DB. Bộ đánh giá có dev/holdout tổng hợp, chế độ mock và live có giới hạn lượt gọi; xem [cách chạy và giới hạn kết luận](docs/TESTING.md).
-
-## Tài liệu
-
-| Tài liệu | Nội dung |
-| --- | --- |
-| [API contract](docs/API_CONTRACT.md) | Tích hợp bot/admin, schema và mã lỗi |
-| [Kiến trúc](docs/BACKEND_ARCHITECTURE.md) | Ranh giới thành phần và độ tin cậy |
-| [Schema dữ liệu](docs/DATA_SCHEMA.md) | Các bảng và quan hệ persistence |
-| [Agent workflow](docs/AGENT_WORKFLOW.md) | Quy trình phân loại và cập nhật topic |
-| [Cấu hình model](docs/MODEL_CONFIGURATION.md) | Provider, model và cấu hình override |
-| [Kiểm thử](docs/TESTING.md) | Test suite và công cụ đánh giá |
-
-## Lưu ý triển khai
-
-- Chạy `alembic upgrade head` trước khi khởi động API/worker; ứng dụng không tự tạo hoặc migrate schema khi startup.
-- SQLite phù hợp cho local hoặc một host dùng file local. Trước khi chạy nhiều host hay tăng tải ghi đồng thời, cần chuyển sang database/queue phù hợp.
-- Nếu bot ở máy khác, giới hạn cổng API bằng firewall cho host đó và dùng TLS qua reverse proxy. Không expose API công khai bằng HTTP không bảo vệ.
-- Health endpoint báo trạng thái database và heartbeat worker gần nhất; nó không đo tiến triển của từng job.
-- Message tuân theo retention của guild. Cấu hình chính sách lưu trữ phù hợp trước khi ingest.
+SQLite hiện dành cho một host dùng file local; URL khác SQLite bị cấu hình từ chối. Ứng dụng không tự migrate schema. Sao lưu DB trước khi nâng cấp; triển khai qua mạng cần TLS và giới hạn truy cập API. Chưa có giao thức sửa/xóa message Discord, OCR/attachment extraction, hay bảo đảm exactly-once trên Discord.

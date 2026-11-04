@@ -6,9 +6,11 @@ from backend.application.errors import ChannelNotAllowedError
 from backend.application.ports.persistence import UnitOfWork
 from backend.application.read_models import TopicReadModel
 from backend.application.services.results import IngestResult, ProcessingResult
+from backend.application.services.topic_projection import project_topic
 from backend.application.services.topic_tools import TopicTools
+from backend.application.topic_memory import InvalidMemoryUpdate, merge_topic_memory
 from backend.domain.entities import ConversationMessage, ConversationTopic
-from backend.domain.enums import ActionType, AssociationKind, TopicStatus
+from backend.domain.enums import AssociationKind, TopicStatus
 
 
 def _classification_payload(
@@ -89,12 +91,6 @@ async def process_message_record(
                 reason="provider selected a missing, closed, or cross-guild topic",
             )
             topic = None
-        elif topic.status == TopicStatus.DORMANT:
-            lifecycle = ConversationTopic.create(topic.guild_id, topic.title)
-            lifecycle.status = TopicStatus(topic.status)
-            lifecycle.transition_to(TopicStatus.RESUMED)
-            await uow.topics.set_status(message.guild_id, topic.id, lifecycle.status.value)
-            await uow.topics.add_episode(message.guild_id, topic.id, message.created_at)
     elif decision.outcome == "new":
         if not decision.title or not decision.title.strip():
             decision.outcome = "defer"
@@ -109,6 +105,34 @@ async def process_message_record(
     elif decision.outcome not in {"defer", "irrelevant"}:
         decision.outcome = "defer"
         decision.reason = "unsupported provider outcome"
+
+    prior_summary = None
+    summary_data = {}
+    if topic is not None:
+        prior_summary = await uow.summaries.latest(message.guild_id, topic.id)
+        try:
+            summary_data = merge_topic_memory(
+                prior_summary.data if prior_summary else {},
+                decision,
+                message.content,
+                topic_id=topic.id,
+                title=topic.title,
+                description=topic.description,
+            )
+        except InvalidMemoryUpdate:
+            classification.decision = decision = TopicDecision(
+                outcome="defer",
+                confidence=0,
+                defer_reason="invalid_evidence",
+                reason="memory reference no longer matches the complete stored topic",
+            )
+            topic = None
+        if topic is not None and topic.status == TopicStatus.DORMANT:
+            lifecycle = ConversationTopic.create(topic.guild_id, topic.title)
+            lifecycle.status = TopicStatus(topic.status)
+            lifecycle.transition_to(TopicStatus.RESUMED)
+            await uow.topics.set_status(message.guild_id, topic.id, lifecycle.status.value)
+            await uow.topics.add_episode(message.guild_id, topic.id, message.created_at)
 
     association_kind = {
         "existing": (
@@ -137,105 +161,7 @@ async def process_message_record(
     )
 
     if topic is not None:
-        await uow.topics.touch(message.guild_id, topic.id, topic.version, message.created_at)
-        create_action_id: str | None = None
-        source_payload = {
-            "source_message_id": message.message_id,
-            "source_author_name": message.author_name,
-            "source_created_at": message.created_at.isoformat(),
-            "source_content": message.content,
-        }
-        if new_topic:
-            create_action = await uow.actions.add(
-                message.guild_id,
-                message.channel_id,
-                topic.id,
-                ActionType.CREATE_THREAD,
-                {"title": topic.title, **source_payload},
-            )
-            create_action_id = create_action.id
-        elif topic.discord_thread_id:
-            await uow.actions.add(
-                message.guild_id,
-                message.channel_id,
-                topic.id,
-                ActionType.APPEND_MESSAGE,
-                source_payload,
-            )
-        else:
-            pending_create = await uow.actions.pending_create(message.guild_id, topic.id)
-            if pending_create:
-                create_action_id = pending_create.id
-                await uow.actions.add(
-                    message.guild_id,
-                    message.channel_id,
-                    topic.id,
-                    ActionType.APPEND_MESSAGE,
-                    source_payload,
-                    dependency_id=pending_create.id,
-                )
-            else:
-                create_action = await uow.actions.add(
-                    message.guild_id,
-                    message.channel_id,
-                    topic.id,
-                    ActionType.CREATE_THREAD,
-                    {"title": topic.title, **source_payload},
-                )
-                create_action_id = create_action.id
-
-        prior_summary = await uow.summaries.latest(message.guild_id, topic.id)
-        old = prior_summary.data if prior_summary else {}
-        old_overview = str(old.get("overview", topic.description))
-        overview = decision.summary.strip() or old_overview
-        merged_lists: dict[str, list[str]] = {}
-        lists_changed = False
-        for field, additions in (
-            ("proposals", decision.proposals),
-            ("decisions", decision.decisions),
-            ("open_questions", decision.open_questions),
-            ("action_items", decision.action_items),
-        ):
-            existing = old.get(field, [])
-            previous_items = (
-                [item for item in existing if isinstance(item, str)]
-                if isinstance(existing, list)
-                else []
-            )
-            merged = list(dict.fromkeys([*previous_items, *additions]))
-            merged_lists[field] = merged
-            lists_changed = lists_changed or len(merged) > len(previous_items)
-        summary_changed = prior_summary is None or overview != old_overview or lists_changed
-        if summary_changed:
-            data: dict[str, object] = {
-                "topic_id": topic.id,
-                "title": topic.title,
-                "overview": overview,
-                **merged_lists,
-            }
-            source_ids = list(
-                dict.fromkeys(
-                    [
-                        *(prior_summary.source_message_ids if prior_summary else []),
-                        message.message_id,
-                    ]
-                )
-            )
-            summary = await uow.summaries.add(
-                message.guild_id,
-                topic.id,
-                (prior_summary.version + 1) if prior_summary else 1,
-                data,
-                source_ids,
-            )
-            await uow.actions.add(
-                message.guild_id,
-                message.channel_id,
-                topic.id,
-                ActionType.UPSERT_SUMMARY,
-                {"summary_id": summary.id, "version": summary.version, "summary": data},
-                dependency_id=create_action_id,
-            )
+        await project_topic(uow, message, topic, new_topic, prior_summary, summary_data)
     return ProcessingResult(
         decision.outcome,
         topic.id if topic else None,

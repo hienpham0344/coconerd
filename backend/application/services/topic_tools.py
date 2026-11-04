@@ -100,9 +100,15 @@ class TopicTools:
             if reply_topic and reply_topic.status != "CLOSED":
                 reply_topic_id = reply_topic.id
                 records = [reply_topic, *(item for item in records if item.id != reply_topic.id)]
+        bounded = records[:60]
+        summaries = (
+            await self.uow.summaries.latest_many(message.guild_id, [item.id for item in bounded])
+            if bounded
+            else {}
+        )
         candidates = []
-        for topic in records[:60]:
-            summary = await self.uow.summaries.latest(message.guild_id, topic.id)
+        for topic in bounded:
+            summary = summaries.get(topic.id)
             candidates.append(
                 TopicCandidate(
                     id=topic.id,

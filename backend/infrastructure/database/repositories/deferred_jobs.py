@@ -37,6 +37,7 @@ class DeferredJobs:
     async def _wake(self, job_id: str, followup_id: str) -> bool:
         changed = await self.session.execute(
             update(ProcessingJobRecord)
+            .execution_options(synchronize_session=False)
             .where(
                 ProcessingJobRecord.id == job_id,
                 ProcessingJobRecord.status == "WAITING",
@@ -56,12 +57,15 @@ class DeferredJobs:
         )
         return changed.rowcount == 1
 
-    async def wait(self, job_id: str, until: datetime) -> bool:
+    async def wait(self, job_id: str, until: datetime, *, owner: str) -> bool:
         changed = await self.session.execute(
             update(ProcessingJobRecord)
+            .execution_options(synchronize_session=False)
             .where(
                 ProcessingJobRecord.id == job_id,
                 ProcessingJobRecord.status == "CLAIMED",
+                ProcessingJobRecord.lease_owner == owner,
+                ProcessingJobRecord.lease_expires_at > datetime.now(UTC),
                 ProcessingJobRecord.reassessment_count == 0,
                 ProcessingJobRecord.model_call_count < 2,
             )

@@ -25,6 +25,7 @@ from backend.infrastructure.database.repositories.jobs import JobRepository
 from backend.infrastructure.database.repositories.messages import MessageRepository
 from backend.infrastructure.database.repositories.model_config import ModelConfigRepository
 from backend.infrastructure.database.repositories.retention import RetentionRepository
+from backend.infrastructure.database.repositories.reviews import ReviewRepository
 from backend.infrastructure.database.repositories.summaries import SummaryRepository
 from backend.infrastructure.database.repositories.topics import TopicRepository
 
@@ -136,6 +137,9 @@ class _TopicsPort:
 
 
 class _ActionsPort:
+    async def update(self, action_id: str, **changes: object) -> None:
+        await self._repository.update(action_id, **changes)
+
     def __init__(self, session: AsyncSession) -> None:
         self._repository = ActionRepository(session)
 
@@ -164,16 +168,20 @@ class _ActionsPort:
     async def get(self, action_id: str) -> ActionState | None:
         return await self._repository.get(action_id)
 
-    async def update(self, action_id: str, **changes: object) -> None:
-        await self._repository.update(action_id, **changes)
+    async def update_leased(
+        self, action_id: str, owner: str, *, lease_token: str | None = None, **changes: object
+    ) -> bool:
+        return await self._repository.update_leased(
+            action_id, owner, lease_token=lease_token, **changes
+        )
 
 
 class _JobsPort:
     async def reserve_model_call(self, job_id: str, owner: str) -> bool:
         return await self._repository.reserve_model_call(job_id, owner)
 
-    async def wait_for_context(self, job_id: str, until: datetime) -> bool:
-        return await self._repository.wait_for_context(job_id, until)
+    async def wait_for_context(self, job_id: str, until: datetime, *, owner: str) -> bool:
+        return await self._repository.wait_for_context(job_id, until, owner=owner)
 
     async def wake_deferred(self, followup_message_id: str) -> None:
         await self._repository.wake_deferred(followup_message_id)
@@ -193,17 +201,22 @@ class _JobsPort:
         return await self._repository.get_state(job_id)
 
     async def record_failure(
-        self, job_id: str, status: str, available_at: datetime, error_type: str
+        self, job_id: str, status: str, available_at: datetime, error_type: str, *, owner: str
     ) -> None:
-        await self._repository.record_failure(job_id, status, available_at, error_type)
+        await self._repository.record_failure(job_id, status, available_at, error_type, owner=owner)
 
-    async def complete(self, job_id: str) -> None:
-        await self._repository.complete(job_id)
+    async def complete(self, job_id: str, *, owner: str) -> None:
+        await self._repository.complete(job_id, owner=owner)
 
 
 class _SummariesPort:
     def __init__(self, session: AsyncSession) -> None:
         self._repository = SummaryRepository(session)
+
+    async def latest_many(
+        self, guild_id: str, topic_ids: Sequence[str]
+    ) -> dict[str, SummaryReadModel]:
+        return await self._repository.latest_many(guild_id, topic_ids)
 
     async def latest(self, guild_id: str, topic_id: str) -> SummaryReadModel | None:
         return await self._repository.latest_read_model(guild_id, topic_id)
@@ -226,6 +239,7 @@ class SqlAlchemyUnitOfWork:
         self._session = session
         self.messages = _MessagesPort(session)
         self.topics = _TopicsPort(session)
+        self.reviews = ReviewRepository(session)
         self.actions = _ActionsPort(session)
         self.guilds = GuildRepository(session)
         self.health = HealthRepository(session)

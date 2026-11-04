@@ -1,6 +1,7 @@
+from collections.abc import Sequence
 from uuid import uuid4
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.application.read_models import SummaryReadModel
@@ -11,6 +12,33 @@ from backend.infrastructure.database.topic_index import index_topic
 class SummaryRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
+
+    async def latest_many(
+        self, guild_id: str, topic_ids: Sequence[str]
+    ) -> dict[str, SummaryReadModel]:
+        if not topic_ids:
+            return {}
+        latest_versions = (
+            select(
+                TopicSummaryRecord.topic_id, func.max(TopicSummaryRecord.version).label("version")
+            )
+            .where(
+                TopicSummaryRecord.guild_id == guild_id,
+                TopicSummaryRecord.topic_id.in_(topic_ids),
+            )
+            .group_by(TopicSummaryRecord.topic_id)
+            .subquery()
+        )
+        rows = await self.session.scalars(
+            select(TopicSummaryRecord)
+            .join(
+                latest_versions,
+                (TopicSummaryRecord.topic_id == latest_versions.c.topic_id)
+                & (TopicSummaryRecord.version == latest_versions.c.version),
+            )
+            .where(TopicSummaryRecord.guild_id == guild_id)
+        )
+        return {row.topic_id: _summary_read_model(row) for row in rows}
 
     async def latest_read_model(self, guild_id: str, topic_id: str) -> SummaryReadModel | None:
         record = await self.latest(guild_id, topic_id)

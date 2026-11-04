@@ -2,12 +2,15 @@
 
 Backend là modular monolith: một codebase, API và worker chạy thành hai tiến trình, dùng chung database. Nghiệp vụ được chia thành module có service, persistence port và router tương ứng. Discord bot do ứng dụng bên ngoài đảm nhiệm.
 
+Cây thư mục tổng quan ở [README](../README.md#cấu-trúc-repository). Từ checkout mới, làm theo [setup backend/DB](BACKEND_SETUP.md); phía bot dùng [hướng dẫn tích hợp](BOT_INTEGRATION.md).
+
 ## Tra cứu theo nghiệp vụ
 
 | Nghiệp vụ | HTTP | Use case | Persistence |
 | --- | --- | --- | --- |
 | Nhận và phân loại message | `routers/messages.py` | `services/messages.py` | `repositories/messages.py`, `jobs.py` |
 | Topic, message theo topic, summary và vòng đời | `routers/topics.py` | `services/topics.py` | `repositories/topics.py`, `summaries.py` |
+| Review, sửa topic và đối chiếu Discord | `routers/reviews.py` | `services/message_review.py`, `review_operations.py`, `review_audit.py` | `repositories/reviews.py`, `review_queries.py`, `action_recovery.py` |
 | Claim và ACK action | `routers/actions.py` | `services/actions.py` | `repositories/actions.py` |
 | Guild, channel allowlist và xóa dữ liệu | `routers/guilds.py` | `services/guilds.py` | `repositories/guilds.py` |
 | Cấu hình model | `routers/model_config.py` | `services/model_config.py` | `repositories/model_config.py` |
@@ -51,6 +54,7 @@ Unit of Work dùng session SQLAlchemy của entrypoint; repository chỉ trả D
 Chạy tại thư mục gốc repository:
 
 ```bash
+mkdir -p data
 alembic upgrade head
 organizer-api
 # Terminal khác, cùng thư mục và cấu hình:
@@ -61,7 +65,7 @@ API mặc định ở `http://localhost:8000`, Swagger ở `/docs`, OpenAPI ở 
 
 `COCONERD_DATABASE_URL` mặc định là `sqlite+aiosqlite:///./data/coconerd.db`: file `data/coconerd.db` tương đối với thư mục chạy lệnh. API, worker và Alembic phải trỏ vào cùng database. Có thể đặt URL tuyệt đối như `sqlite+aiosqlite:////absolute/path/coconerd.db` để tránh phụ thuộc thư mục chạy. Không lưu dữ liệu nghiệp vụ trong RAM của API.
 
-Schema nằm ở `backend/infrastructure/database/models.py`, migration ở `alembic/`; xem [schema dữ liệu](DATA_SCHEMA.md). Ứng dụng không tự migrate khi startup. Connection bật SQLite foreign keys; refactor này không đổi bảng, migration hay engine.
+Schema nằm ở `backend/infrastructure/database/models.py`, migration ở `alembic/`; xem [schema dữ liệu](DATA_SCHEMA.md). Ứng dụng không tự migrate khi startup. Connection ứng dụng bật SQLite foreign keys. Revision `20261104_0003` bổ sung trạng thái review/sync, action lease token và backfill alias tìm kiếm; sao lưu DB trước khi nâng cấp.
 
 ## Vận hành
 
@@ -72,3 +76,9 @@ Worker dùng lease có hạn, attempt budget và backoff cho job/action. Khi h�
 SQLite phù hợp triển khai một host với file trên local storage và số lượng ghi đồng thời nhỏ. Cần chọn database/queue phù hợp trước khi mở rộng nhiều host. Health phản ánh kết nối DB và heartbeat gần nhất, không chứng minh mọi job đang tiến triển.
 
 Chất lượng phân loại cần dữ liệu gán nhãn và đánh giá riêng; mock không đo chất lượng Meta. Các giới hạn kiểm chứng hiện tại được ghi trong [tài liệu kiểm thử](TESTING.md).
+
+## Tách trách nhiệm trong đợt reliability
+
+`services/messages.py` giữ ingestion và điều phối phân loại. `topic_memory.py` là reducer thuần cho facts; `services/topic_projection.py` chịu trách nhiệm summary/outbox. Manual review dùng hợp đồng `review_contracts.py`, port riêng `ports/reviews.py` và service riêng, không nhét endpoint/admin logic vào workflow AI.
+
+Các pattern đang dùng là Repository, Unit of Work, Transactional Outbox, provider adapter và optimistic concurrency. Thêm module vì có trách nhiệm nghiệp vụ cụ thể; chưa cần microservices hay một framework subagent mới. Các application/domain module vẫn không import SQLAlchemy hoặc FastAPI.
