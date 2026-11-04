@@ -1,16 +1,43 @@
-# Discord Conversation Organizer
+# Coconerd
 
-**Backend độc lập để gom hội thoại Discord theo chủ đề.** API nhận và lưu message trước; worker phân loại, cập nhật topic/summary và tạo action để Discord bot bên ngoài xử lý.
+**Bot Discord, backend tổ chức hội thoại và website công khai trong cùng repository.** API nhận và lưu message trước; worker phân loại, cập nhật topic/summary và tạo action để bot xử lý.
 
 > [!NOTE]
-> Repository này chỉ chứa backend. Không có bot, Discord SDK, bot token hay bước đăng nhập Discord. Bot do thành viên khác phát triển sẽ tích hợp qua [HTTP API](docs/API_CONTRACT.md).
+> `backend/` chứa API và worker Python; `bot/` chứa bot Discord; `web/` chứa website React/TypeScript và máy chủ web Node.js. Website công khai không yêu cầu đăng nhập, không dùng bot token và không truy cập hội thoại riêng. Các thành phần vẫn chạy và triển khai độc lập. Hợp đồng tích hợp bot nằm trong [HTTP API](docs/API_CONTRACT.md).
 
 ```text
 Discord bot → Backend API → SQLite job queue → AI worker → Topics, summaries, actions → Discord bot
 ```
 
+## Website công khai
+
+Cần Node.js 22.12 trở lên. Từ thư mục gốc repo:
+
+```bash
+cd web
+npm ci
+npm run dev
+```
+
+Mở http://127.0.0.1:5173/. Website và dữ liệu mẫu hoạt động độc lập với bot/backend; không cần `.env` để xem thử. Hướng dẫn link Discord, health, production build và kiểm tra nằm trong [web/README.md](web/README.md).
+
+```text
+coconerd/
+├── backend/       # API và worker Python
+├── bot/           # Discord bot
+├── web/           # Website, server Node.js và test riêng
+├── alembic/       # Migration backend
+├── tests/         # Test backend
+├── scripts/
+├── docs/
+└── pyproject.toml
+```
+
+Kiểm tra website bằng `npm test` và `npm run build` trong `web/`; kiểm tra backend bằng `python -m pytest -q` từ gốc repo. Bridge nội bộ tùy chọn có test riêng: `cd web && npm run test:bridge`. Không đưa `.env`, `node_modules`, build output, cache hoặc database vào Git.
+
 ## Nội dung
 
+- [Website công khai](#website-công-khai)
 - [Chạy nhanh](#chạy-nhanh)
 - [Tính năng](#tính-năng)
 - [Cấu trúc backend và lưu trữ](#cấu-trúc-backend-và-lưu-trữ)
