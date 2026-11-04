@@ -8,11 +8,11 @@ export class ApiError extends Error {
 export async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   let response: Response;
   try { response = await fetch(path, { ...init, signal: init.signal || AbortSignal.timeout(10_000) }); }
-  catch { throw new ApiError(0, 'Chưa kết nối được website. Thử lại sau một chút nhé.'); }
+  catch { throw new ApiError(0, 'Unable to connect to the website. Please try again shortly.'); }
   let data;
   try { data = await response.json(); }
-  catch { throw new ApiError(502, 'Chưa đọc được phản hồi từ website.'); }
-  if (!response.ok) throw new ApiError(response.status, typeof data.detail === 'string' ? data.detail : 'Chưa thể hoàn thành thao tác.');
+  catch { throw new ApiError(502, 'Unable to read response from the website.'); }
+  if (!response.ok) throw new ApiError(response.status, typeof data.detail === 'string' ? data.detail : 'Unable to complete this action.');
   return data as T;
 }
 
@@ -37,12 +37,12 @@ export function client() {
       return { topics: items.length, active_topics: items.filter(topic => ['ACTIVE', 'RESUMED'].includes(topic.status)).length, messages: items.reduce((count, topic) => count + demoMessages(topic).length, 0), channels: guild.allowed_channel_ids.length };
     },
     topics: async (guildId: string, query = '', status = '', offset = 0): Promise<TopicPage> => {
-      const items = stored('topics', demoTopics).filter(topic => topic.guild_id === guildId && (!status || topic.status === status) && topic.title.toLocaleLowerCase('vi').includes(query.toLocaleLowerCase('vi')));
+      const items = stored('topics', demoTopics).filter(topic => topic.guild_id === guildId && (!status || topic.status === status) && topic.title.toLowerCase().includes(query.toLowerCase()));
       return { items: items.slice(offset, offset + 12).map(topic => ({ ...topic, message_count: demoMessages(topic).length })), total: items.length, limit: 12, offset };
     },
     topic: async (guildId: string, topicId: string): Promise<Topic> => {
       const topic = stored('topics', demoTopics).find(item => item.guild_id === guildId && item.topic_id === topicId);
-      if (!topic) throw new ApiError(404, 'Không tìm thấy chủ đề trong không gian mẫu này.');
+      if (!topic) throw new ApiError(404, 'Topic not found in this demo workspace.');
       return topic;
     },
     messages: async (topic: Topic, before?: string): Promise<Message[]> => before ? [] : demoMessages(topic),
@@ -50,7 +50,7 @@ export function client() {
     close: async (topic: Topic) => {
       const items = stored('topics', demoTopics).map(item => item.guild_id === topic.guild_id && item.topic_id === topic.topic_id ? { ...item, status: 'CLOSED' } : item);
       try { localStorage.setItem('coconerd-demo-topics', JSON.stringify(items)); }
-      catch { throw new ApiError(0, 'Trình duyệt chưa cho phép lưu thay đổi của bản mẫu.'); }
+      catch { throw new ApiError(0, 'Browser storage is not permitted to save changes in this demo.'); }
     },
   };
 }
