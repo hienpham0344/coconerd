@@ -248,6 +248,71 @@
 @media(max-height:800px) and (min-width:761px){.hero-copy{padding-top:100px;padding-bottom:86px}.hero-mascot{width:124px;margin-bottom:12px}.hero-copy h1{font-size:clamp(72px,7.5vw,104px)}.hero-eyebrow{margin-bottom:15px}.hero-copy>p{margin-top:18px}.hero-copy .round-cta{width:48px;height:48px;margin-top:18px}}
 @media(max-width:760px){.hero-copy{padding:100px 20px 98px;inset:auto;transform:none}.hero-copy h1{font-size:clamp(45px,15.5vw,100px);line-height:1.08}.hero-eyebrow{font-size:6px;letter-spacing:1.4px;margin-bottom:18px}.hero-copy>p{font-size:16px;margin-top:22px}.hero-bottom{bottom:25px}.hero-copy .round-cta{margin-top:22px;width:50px;height:50px}}
 
+/* Workspace reading sizes and contrast, scoped away from the public pages. */
+.workspace{--muted:#b2b9a5;--line:rgba(222,224,204,.25);--workspace-secondary:#c5c8b8;font-size:14px;line-height:1.65}
+.workspace .workspace-label,.workspace .breadcrumb,.workspace .page-heading .eyebrow,.workspace .welcome-garden .eyebrow{color:var(--muted);font-size:11px;font-weight:600;letter-spacing:1.1px}
+.workspace .breadcrumb>span{color:var(--muted)}
+.workspace .sidebar nav>a{font-size:14px;font-weight:500;color:#c5cbb9}
+.workspace .sidebar nav>a.active{color:var(--cream);background:#d8c5a31c;box-shadow:inset 2px 0 var(--lime)}
+.workspace .sidebar nav>a:hover{color:var(--cream);background:#d8c5a314}
+.workspace .nav-count{font-size:12px;color:var(--cream);background:#d8c5a31a}
+.workspace .sidebar-garden p,.workspace .sidebar-garden em{font-size:13px;color:var(--muted)}
+.workspace .sidebar-user strong{font-size:12px;font-weight:600}
+.workspace .sidebar-user>div>span{font-size:11px;color:var(--muted)}
+.workspace .connection,.workspace .guild-picker select,.workspace .guild-avatar{font-size:12px;color:var(--workspace-secondary)}
+.workspace .connection-unavailable,.workspace .connection-degraded{color:#e2bd87}
+.workspace .guild-picker{min-height:44px;border-color:var(--line);background:#ffffff03}
+.workspace .demo-banner,.workspace .demo-banner>a{font-size:12px;color:var(--workspace-secondary)}
+.workspace .reset-demo{font-size:12px;color:var(--cream);border-color:var(--line);padding:5px 9px}
+.workspace .page-heading h1{font-size:32px;font-weight:600;letter-spacing:-1px}
+.workspace .page-heading p,.workspace .welcome-garden p,.workspace .detail-heading>p{font-size:14px;line-height:1.85;color:var(--workspace-secondary)}
+.workspace .welcome-garden h2{font-size:30px;font-weight:500;line-height:1.45}
+.workspace .welcome-garden .text-link,.workspace .topics-heading .text-link{font-size:13px;font-weight:600;color:#e0cfad}
+.workspace .stat>div{font-size:13px;line-height:1.5;min-height:40px;color:var(--workspace-secondary)}
+.workspace .stat>div>svg{color:#c5cfad}
+.workspace .stat>strong{font-size:32px;margin-top:8px}
+.workspace .topics-heading h2{font-size:17px;font-weight:600}
+.workspace .topics-heading>div>span{font-size:11px;color:var(--muted);border-color:var(--line)}
+.workspace .search-field{height:44px;color:#c5cfad;background:#181b14;border-color:#626957}
+.workspace .search-field input,.workspace .filter-select{font-size:14px;color:var(--cream)}
+.workspace .search-field input::placeholder{color:#aeb69f;opacity:1}
+.workspace .filter-select{min-height:44px;background:#181b14;border-color:#626957}
+.workspace .search-field:focus-within{border-color:var(--lime);box-shadow:0 0 0 2px #d8c5a31a}
+.workspace .topic-row{border-top-color:var(--line)}
+.workspace .topic-row:hover{background:#d8c5a30a}
+.workspace .topic-row h3{font-size:15px;font-weight:600;line-height:1.6}
+.workspace .topic-row-copy>p{font-size:13px;line-height:1.8;color:var(--workspace-secondary)}
+.workspace .topic-meta>span,.workspace .topic-meta>small,.workspace .topic-mobile-meta,.workspace .topic-mobile-meta>span:last-child{font-size:12px;color:var(--muted)}
+.workspace .topic-arrow{color:#b8c4a5}
+.workspace .status,.workspace .topic-row>.status,.workspace .topic-mobile-meta .status{font-size:11px;font-weight:500;padding:6px 8px;color:#d2dfb6;border-color:#a5bd7c59;background:#a5bd7c0f}
+.workspace .status-resumed,.workspace .topic-row>.status-resumed,.workspace .topic-mobile-meta .status-resumed{color:#d2c7ed;border-color:#b6b0d459;background:#b6b0d40f}
+.workspace .status-dormant,.workspace .topic-row>.status-dormant,.workspace .topic-mobile-meta .status-dormant{color:#dfcdae;border-color:#b7ab9159;background:#b7ab910f}
+.workspace .status-closed,.workspace .topic-row>.status-closed,.workspace .topic-mobile-meta .status-closed{color:#bcc6b3;border-color:#80907966;background:#8090790f}
+.workspace .button.small{font-size:13px;min-height:40px}
+.workspace .button.secondary{border-color:#626957;background:#ffffff04}
+.workspace .button.secondary:hover:not(:disabled){border-color:#a8ae96;background:#d8c5a314}
+.workspace .pagination,.workspace .dashboard-footnote,.workspace .small-note,.workspace .detail-footer .small-note{font-size:12px;color:var(--muted)}
+.workspace .detail-meta,.workspace .detail-tabs>button{font-size:13px;color:var(--workspace-secondary)}
+.workspace .detail-tabs>button[aria-selected=true]{color:var(--lime)}
+.workspace .summary-caption,.workspace .summary-caption>span{font-size:11px;color:var(--muted)}
+.workspace .summary-content h3{font-size:15px;font-weight:600;color:var(--cream)}
+.workspace .summary-content section p,.workspace .summary-content section li{font-size:14px;color:var(--workspace-secondary);line-height:1.85}
+@media(max-width:760px){
+  .workspace-header>div:first-child{min-width:0}
+  .workspace .breadcrumb{font-size:10px;letter-spacing:.3px;gap:6px}
+  .workspace .demo-banner{display:grid;grid-template-columns:16px minmax(0,1fr) auto;font-size:12px;gap:9px 8px;align-items:start}
+  .workspace .demo-banner>span{grid-column:2/-1}
+  .workspace .demo-banner>.reset-demo{grid-column:2;justify-self:start}
+  .workspace .demo-banner>a{grid-column:3;margin-left:0;align-self:center}
+  .workspace .page-heading h1{font-size:28px}
+  .workspace .page-heading>.button{font-size:0}
+  .workspace .page-heading>.button>svg{width:19px;height:19px}
+  .workspace .welcome-garden h2{font-size:27px}
+  .workspace .search-field input,.workspace .filter-select{font-size:16px}
+  .workspace .topic-row h3{font-size:15px}
+  .workspace .topic-row-copy>p{font-size:13px}
+}
+
 /* Progressive reveals stay visible when motion is disabled or JS is unavailable. */
 .scroll-reveal{opacity:0;transform:translate3d(0,24px,0);transition:opacity .7s ease,transform .7s cubic-bezier(.22,1,.36,1);transition-delay:var(--reveal-delay,0ms)}
 .scroll-reveal.is-revealed{opacity:1;transform:none}
