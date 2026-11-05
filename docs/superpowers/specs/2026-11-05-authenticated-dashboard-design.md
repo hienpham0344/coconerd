@@ -1,6 +1,6 @@
 # Dashboard quản trị Coconerd có đăng nhập Discord
 
-Ngày: 2026-11-05. Trạng thái: đã được người dùng duyệt ngày 2026-11-05; đang triển khai.
+Ngày: 2026-11-05. Trạng thái: đã được người dùng duyệt ngày 2026-11-05; đã triển khai code và kiểm thử cục bộ.
 
 ## Yêu cầu đã xác nhận
 
@@ -31,8 +31,7 @@ viên; mỗi người chỉ quản lý server mình có quyền.
 3. Tài khoản/mật khẩu riêng cho từng người cần thêm quản lý tài khoản và vẫn phải
    liên kết Discord để xác minh quyền; không có lợi cho yêu cầu hiện tại.
 
-Đăng nhập Discord là đề xuất triển khai, chưa coi việc chọn mô hình nhiều server
-là phê duyệt toàn bộ bản thiết kế này.
+Người dùng đã duyệt bản thiết kế và phương án Discord OAuth2 trong cuộc trò chuyện.
 
 ## Phạm vi dashboard thật
 
@@ -56,7 +55,7 @@ gửi chat tùy ý, hoặc tự động replay action ngoài hợp đồng backe
 
 ## Quyền truy cập
 
-Đề xuất chính sách quyền để người dùng duyệt:
+Chính sách quyền đã được người dùng duyệt:
 
 - Người dùng là chủ server hoặc có quyền Discord `ADMINISTRATOR` mới được đọc
   và sửa dữ liệu hội thoại của server đó. Chỉ có `MANAGE_GUILD` không đủ, vì quyền
@@ -150,6 +149,7 @@ OAuth thật, chạy migration production hoặc deploy production cần bước
 
 ## Tự rà soát thiết kế
 
-Đã đối chiếu với router backend, hợp đồng review và bridge hiện có. Điểm cần
-người dùng duyệt là phạm vi đầy đủ bên trên và chính sách owner/Administrator.
-Các chi tiết kỹ thuật là đề xuất của người triển khai; chưa sửa code sản phẩm.
+Đã đối chiếu với router backend, hợp đồng review và bridge hiện có. Code thực hiện
+đúng phạm vi đã duyệt, kèm kiểm thử auth/guild isolation, migration, toàn suite
+backend và browser bằng fixture. Chưa kiểm thử OAuth với Discord thật hoặc chạy
+migration production trong phiên triển khai này.

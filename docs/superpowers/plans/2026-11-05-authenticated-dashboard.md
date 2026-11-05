@@ -31,10 +31,10 @@
 
 **Interfaces:** `DashboardRepository(session)` cung cấp guild/settings/overview/topics và credential CRUD/consume. `create_router(repository, dependencies)` tạo route admin `/api/v1/admin/web/...`.
 
-- [ ] Test route chính trả 401 khi thiếu admin key, trả dữ liệu guild-scoped có phân trang; credential có expiry và consume nguyên tử.
-- [ ] Chạy `.venv/bin/python -m pytest tests/backend/test_dashboard.py -q`, xác nhận RED.
-- [ ] Thêm model/migration chỉ-add và repository/router, đăng ký với app; bridge tái sử dụng route chính.
-- [ ] Chạy lại test, bridge và migration SQLite cô lập; xác nhận GREEN.
+- [x] Test route chính trả 401 khi thiếu admin key, trả dữ liệu guild-scoped có phân trang; credential có expiry và consume nguyên tử.
+- [x] Chạy `.venv/bin/python -m pytest tests/backend/test_dashboard.py -q`, xác nhận RED.
+- [x] Thêm model/migration chỉ-add và repository/router, đăng ký với app; bridge tái sử dụng route chính.
+- [x] Chạy lại test, bridge và migration SQLite cô lập; xác nhận GREEN.
 
 ### Task 2: Discord OAuth và session
 
@@ -42,10 +42,10 @@
 
 **Interfaces:** `createDashboardHandler(config)` trả handler `(req,res,url) -> Promise<boolean>`; `config.fetchImpl` dùng cho test. Auth `/auth/discord`, `/auth/discord/callback`, `/api/auth/session`, `/api/auth/logout`; credential API chỉ server-to-server.
 
-- [ ] Test state/PKCE, callback sai/replay, cookie HttpOnly/Secure, mã hóa token, expiry/logout và session dùng bởi hai handler cùng storage.
-- [ ] Chạy `node --test tests/dashboard.test.mjs`, xác nhận RED.
-- [ ] OAuth code grant, AES-GCM storage, cookie opaque, refresh, rate limit và error sanitization.
-- [ ] Chạy test auth và test server cũ, xác nhận GREEN.
+- [x] Test state/PKCE, callback sai/replay, cookie HttpOnly/Secure, mã hóa token, expiry/logout và session dùng bởi hai handler cùng storage.
+- [x] Chạy `node --test tests/dashboard.test.mjs`, xác nhận RED.
+- [x] OAuth code grant, AES-GCM storage, cookie opaque, refresh, rate limit và error sanitization.
+- [x] Chạy test auth và test server cũ, xác nhận GREEN.
 
 ### Task 3: Guild authorization và proxy cụ thể
 
@@ -53,10 +53,10 @@
 
 **Interfaces:** `/api/dashboard/guilds`, `/api/dashboard/guilds/:guild/...` cho overview, topics/messages/summary, review/corrections, sync/resume/recovery, settings/model/channels.
 
-- [ ] Test anonymous/CSRF/origin, owner/admin so với manager, thu hồi quyền, guild khác, actor giả, global model và route/method ngoài allowlist.
-- [ ] Chạy test, xác nhận RED cho từng nhóm quyền.
-- [ ] Kiểm tra quyền mọi request; map đường dẫn có guild bắt buộc; actor từ session; kiểm tra channel thuộc guild.
-- [ ] Chạy toàn bộ web test, xác nhận GREEN.
+- [x] Test anonymous/CSRF/origin, owner/admin so với manager, thu hồi quyền, guild khác, actor giả, global model và route/method ngoài allowlist.
+- [x] Chạy test, xác nhận RED cho từng nhóm quyền.
+- [x] Kiểm tra quyền mọi request; map đường dẫn có guild bắt buộc; actor từ session; kiểm tra channel thuộc guild.
+- [x] Chạy toàn bộ web test, xác nhận GREEN.
 
 ### Task 4: Dashboard live và đăng nhập
 
@@ -64,9 +64,9 @@
 
 **Interfaces:** Live client giữ cùng API đọc với demo, thêm mutation; `LiveDashboard` bảo vệ bằng session và xóa dữ liệu khi 401/403; live deep link chứa guild ID.
 
-- [ ] Test routing app/demo tách biệt và client không fallback sang dữ liệu mẫu; chạy RED.
-- [ ] Thêm login/session shell, guild selector, live adapter, dữ liệu thật và refresh khi trang hiện; giữ demo.
-- [ ] Type-check/build, chạy test routing/client, xác nhận GREEN.
+- [x] Test routing app/demo tách biệt và client không fallback sang dữ liệu mẫu; chạy RED.
+- [x] Thêm login/session shell, guild selector, live adapter, dữ liệu thật và refresh khi trang hiện; giữ demo.
+- [x] Type-check/build, chạy test routing/client, xác nhận GREEN.
 
 ### Task 5: Review, sync và settings
 
@@ -74,18 +74,18 @@
 
 **Interfaces:** Review snapshot theo `CorrectMessage`; sync/recover theo `ResumeTopicSync`/`RecoverAction`; model luôn có guild; form sinh và giữ request_id đến khi dữ liệu thao tác đổi.
 
-- [ ] Test tạo snapshot, nguồn message, chọn topic đích, version/revision và request_id ổn định; chạy RED.
-- [ ] Form đầy đủ dữ liệu thực, lý do/xác nhận recovery, phân trang history; hiển thị 409 và yêu cầu tải lại.
-- [ ] Build và kiểm tra form/desktop/mobile nếu preview khả dụng; xác nhận GREEN.
+- [x] Test tạo snapshot, nguồn message, chọn topic đích, version/revision và request_id ổn định; chạy RED.
+- [x] Form đầy đủ dữ liệu thực, lý do/xác nhận recovery, phân trang history; hiển thị 409 và yêu cầu tải lại.
+- [x] Build và kiểm tra form/desktop/mobile nếu preview khả dụng; xác nhận GREEN.
 
 ### Task 6: Kiểm chứng và tài liệu
 
 **Files:** `web/README.md`, `web/.env.example`, `web/docs/design.md`, verification và spec/plan.
 
-- [ ] Ghi cấu hình OAuth/callback/session/backend bằng placeholder; hướng dẫn migration và production HTTPS, giới hạn kiểm thử thật.
-- [ ] Chạy web tests/build, backend tests liên quan rồi suite backend; phân biệt lỗi baseline và regression.
-- [ ] Rà diff riêng phần thay đổi dashboard, kiểm tra không secret/dependency/lockfile phát sinh.
-- [ ] Ghi kết quả thực tế, nêu rõ chưa deploy và chưa login Discord thật nếu thiếu cấu hình.
+- [x] Ghi cấu hình OAuth/callback/session/backend bằng placeholder; hướng dẫn migration và production HTTPS, giới hạn kiểm thử thật.
+- [x] Chạy web tests/build, backend tests liên quan rồi suite backend; phân biệt lỗi baseline và regression.
+- [x] Rà diff riêng phần thay đổi dashboard, kiểm tra không secret/dependency/lockfile phát sinh.
+- [x] Ghi kết quả thực tế, nêu rõ chưa deploy và chưa login Discord thật nếu thiếu cấu hình.
 
 ## Execution ledger
 
@@ -94,8 +94,12 @@
 - Task 1: complete — test dashboard/migration/architecture/API contract: 13 passed. SQLite migration giữ dữ liệu cũ và Alembic check đạt.
 - Task 2/3: implemented — 7 test auth (OAuth/PKCE, mã hóa, CSRF, owner/admin, scope, logout/refresh CAS) đạt; thêm test adapter Vercel.
 - Task 4/5: implemented — routing/review/live-client test đạt; production build đạt trước cập nhật nội dung privacy cuối.
-- Task 6: in progress — docs, whole-suite rerun và browser QA bằng dữ liệu giả.
+- Task 6: complete — backend 501 passed/2 skipped; bridge 2 passed; web 24 passed; production build và targeted Ruff/diff checks đạt. Browser fixture: login, settings, correction, resume/recover, logout và reload đạt.
 - Ruling: router nhận repository dependency từ composition root, không import infrastructure, để đáp ứng test kiến trúc hiện có.
 - Ruling: README hiện xác định hosting Vercel; bổ sung catch-all Node Function và OAuth rewrites, dùng cùng handler với Node local. Chỉ chuẩn bị source, không deploy.
 - Ruling: không có công cụ subagent trong phiên này; tự rà soát riêng diff dashboard và kiểm tra bằng test thay cho việc tuyên bố có reviewer độc lập.
 - Baseline: web 11 passed ngoài sandbox; sandbox chặn localhost (EPERM). First full backend run: 498 passed, 2 skipped; lỗi snapshot/architecture do route mới đã được sửa và kiểm tra focused 13 passed.
+
+- Final review: sửa expiry SQLite trả UTC offset rõ ràng (regression RED → GREEN); refresh dùng compare-and-set không khôi phục phiên đã logout; view live thiếu injected client vẫn gọi private API, không fallback demo.
+- Browser QA chỉ dùng dữ liệu giả trên localhost; không dùng Discord/database/credential thật. Công cụ không có đổi viewport nên mobile chưa kiểm tra trực tiếp. Preview test đã dừng.
+- Giai đoạn triển khai không chạy commit/push/deploy. Sau đó người dùng yêu cầu commit từng phần và push vào main; các commit có sẵn từ phiên khác được giữ nguyên, không reset/stash/đổi nhánh.

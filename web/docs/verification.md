@@ -64,3 +64,14 @@ Final continuation: preview restarted after the interrupted session, latest land
 - Ruff check and format check passed for `web/bridge/` and `web/tests/test_bridge.py`. Root backend/bot implementation was not changed. Git ignore checks covered web dependencies, dist, cache, TypeScript build metadata and private environment files. A source scan found no credential-pattern matches; configuration sample values were not printed.
 - Production preview started successfully from `web/` at `http://127.0.0.1:5173/`. A new direct HTTP smoke attempt and its one retry were rejected because automatic permission review exceeded its deadline. The browser read also hit the review deadline. No HTTP-smoke or post-move browser success is claimed; the automated HTTP/routing tests above did complete.
 - Root and web setup documentation now describe the monorepo layout and portable commands. Publication is to `main` and `fe` after a fresh fetch and conflict reconciliation; no force push or hosting deployment is part of this work.
+
+## Authenticated dashboard — 2026-11-05
+
+- Backend suite: **501 passed, 2 skipped**; PostgreSQL-only tests skipped because no disposable test server was supplied. All DB/migration tests used isolated SQLite files.
+- Optional bridge: **2 passed** with the main backend dashboard routes.
+- Web: **24 passed**, including OAuth/PKCE, encrypted persistent session, CSRF/origin, owner/Administrator scope, forbidden cross-guild/global proxy access, permission revocation, refresh/logout race, serverless body handling, live/demo separation and full review snapshots.
+- Production `npm run build` and targeted Python Ruff checks passed. No package dependency/lockfile changes were required for the dashboard.
+- Browser QA used a temporary localhost fixture with fake Discord/backend/tokens: login, guild overview, settings save, topic messages/summary, correction with memory/sources, paused sync, resume, performed-action recovery, logout and reload back to login were visibly verified.
+- Screenshot of the desktop dashboard was captured using fixture data. Viewport emulation was unavailable; mobile behavior was not directly exercised.
+- Actual Discord OAuth, production migration and production deployment were not exercised in this chat. Configure the server-only values in `../.env.example` and follow `../README.md` before enabling the real dashboard.
+- Final review caught SQLite expiry without an explicit timezone; credentials now serialize UTC consistently. Regression was observed failing, then the complete backend suite passed after the fix.
