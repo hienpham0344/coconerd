@@ -1,0 +1,10 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "functions": {
+    "api/*.mjs": { "maxDuration": 60 }
+  },
+  "rewrites": [
+    { "source": "/auth/discord", "destination": "/api/auth/discord" },
+    { "source": "/auth/discord/callback", "destination": "/api/auth/discord/callback" }
+  ]
+}
