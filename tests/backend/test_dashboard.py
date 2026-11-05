@@ -62,7 +62,9 @@ async def test_dashboard_credentials_are_persistent_expiring_and_one_use(api_cli
     }
     assert (await api_client.put(path, json=body)).status_code == 401
     assert (await api_client.put(path, json=body, headers=ADMIN)).status_code == 200
-    assert (await api_client.get(path, headers=ADMIN)).json()["payload"] == body["payload"]
+    stored = (await api_client.get(path, headers=ADMIN)).json()
+    assert stored["payload"] == body["payload"]
+    assert stored["expires_at"].endswith(("Z", "+00:00"))
     assert (await api_client.post(path + "/consume", headers=ADMIN)).status_code == 200
     assert (await api_client.post(path + "/consume", headers=ADMIN)).status_code == 404
     assert (await api_client.get(path, headers=ADMIN)).status_code == 404

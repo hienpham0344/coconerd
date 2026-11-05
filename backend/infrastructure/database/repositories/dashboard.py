@@ -137,6 +137,13 @@ class DashboardRepository:
         await self.session.commit()
         return True
 
+    @staticmethod
+    def credential_data(payload, expires_at):
+        # SQLite returns naive UTC values; serialize an explicit offset for Node clients.
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=UTC)
+        return {"payload": payload, "expires_at": expires_at}
+
     async def credential(self, kind, key, consume=False):
         conditions = (
             DashboardCredentialRecord.kind == kind,
@@ -151,9 +158,9 @@ class DashboardRepository:
             )
             row = result.mappings().first()
             await self.session.commit()
-            return dict(row) if row else None
+            return self.credential_data(row["payload"], row["expires_at"]) if row else None
         record = await self.session.scalar(select(DashboardCredentialRecord).where(*conditions))
-        return {"payload": record.payload, "expires_at": record.expires_at} if record else None
+        return self.credential_data(record.payload, record.expires_at) if record else None
 
     async def delete_credential(self, kind, key):
         await self.session.execute(

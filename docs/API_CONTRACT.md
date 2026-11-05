@@ -173,3 +173,6 @@ refresh; a changed/revoked credential returns 409. GET ignores expired credentia
 DELETE revokes a credential, and POST `/credentials/oauth/{sha256_id}/consume`
 atomically consumes one state. The browser gateway never exposes these routes.
 No access/refresh token is stored in plaintext or returned to the browser.
+
+Dashboard credential expiry responses always include an explicit UTC offset,
+including SQLite development databases.
