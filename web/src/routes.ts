@@ -5,7 +5,7 @@ const aliases: Record<string, string> = {
 
 export function resolveNavigation(hash: string, currentRoute = '/') {
   const requested = hash.replace(/^#/, '') || '/';
-  const target = aliases[requested] || requested.replace(/^\/app(?=\/|$)/, '/demo');
+  const target = aliases[requested] || requested;
   if (target === '/invite') return { route: currentRoute, inviteOpen: true, resetScroll: false };
   return { route: target, inviteOpen: false, resetScroll: target !== currentRoute };
 }

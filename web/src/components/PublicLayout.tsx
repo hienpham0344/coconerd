@@ -3,7 +3,7 @@ import { ArrowUpRight, Menu, X } from 'lucide-react';
 import { Brand, Flower } from './Brand';
 
 const navigation = [
-  ['Tính năng', '/features'], ['Hướng dẫn', '/guide'], ['Trải nghiệm', '/demo'],
+  ['Tính năng', '/features'], ['Hướng dẫn', '/guide'], ['Trải nghiệm', '/demo'], ['Dashboard', '/app'],
 ];
 
 export function PublicHeader({ hero = false, active = '' }: { hero?: boolean; active?: string }) {

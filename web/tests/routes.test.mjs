@@ -32,7 +32,9 @@ test('content navigation resets scroll only when the destination changes', () =>
 });
 
 test('demo deep links and unknown destinations retain their content route', () => {
-  assert.equal(resolveNavigation('#/app/topics/new-website').route, '/demo/topics/new-website');
+  assert.equal(resolveNavigation('#/app/guilds/123456789012345678/topics/new-website').route, '/app/guilds/123456789012345678/topics/new-website');
+  assert.equal(resolveNavigation('#/app').route, '/app');
+  assert.equal(resolveNavigation('#/demo/topics/new-website').route, '/demo/topics/new-website');
   assert.equal(resolveNavigation('#/missing').route, '/missing');
   assert.equal(resolveNavigation('').route, '/');
 });

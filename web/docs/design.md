@@ -23,3 +23,16 @@ The user accepts the landing but reports broken-looking typography, unattractive
 Keep three navigation destinations: Features, Guide and Demo. Features becomes three illustrated explanations of topics, summaries and channel/data control. Guide combines practical steps, searchable FAQs, support availability and compact service status. Keep privacy accessible from the footer. Old FAQ/support/status URLs resolve to Guide; invitation URLs open an accessible modal over the current page instead of a duplicate availability page. Never invent official links or service health.
 
 Considered keeping all existing pages with cosmetic changes, but that leaves the duplication the user identified. Prefer consolidation plus typography/layout fixes. Keep the current React, Three.js, motion controls, browser-local demo and public API boundaries. No additional dependencies, commits or deployment.
+
+## Authenticated dashboard — 2026-11-05
+
+The user subsequently approved a real multi-guild dashboard behind Discord login.
+This supersedes the earlier no-login direction for `/#/app`; public pages and
+`/#/demo` remain public. The approved spec is
+`../../docs/superpowers/specs/2026-11-05-authenticated-dashboard-design.md`.
+
+Node handles OAuth code grant/PKCE, encrypted persistent sessions, CSRF and
+per-guild owner/Administrator checks. The main Python API exposes internal
+dashboard read/persistence routes. Real chat data, review/correction, sync/recovery
+and guild settings use explicit private routes, without a generic admin proxy.
+The same handlers run in the local Node server and the Vercel catch-all function.

@@ -3,6 +3,7 @@ import { readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHandler } from './handler.mjs';
+import { environmentConfig } from './config.mjs';
 import { isPrivatePath } from './assets.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -34,11 +35,7 @@ async function staticHandler(req, res) {
   } catch { res.writeHead(503).end('Build the website first: npm run build'); }
 }
 
-server.on('request', createHandler({
-  inviteUrl: process.env.DISCORD_INVITE_URL,
-  supportUrl: process.env.DISCORD_SUPPORT_URL,
-  statusUrl: process.env.COCONERD_STATUS_URL,
-}, staticHandler));
+server.on('request', createHandler(environmentConfig(), staticHandler));
 server.listen(port, host, () => console.log(`Coconerd: http://${host}:${port}`));
 for (const signal of ['SIGTERM', 'SIGINT']) process.on(signal, async () => {
   server.close();

@@ -1,3 +1,5 @@
+import { createDashboardHandler } from './dashboard.mjs';
+
 function json(res, status, data, head = false) {
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
   res.end(head ? undefined : JSON.stringify(data));
@@ -18,6 +20,7 @@ function discordLink(value, kind) {
 }
 
 export function createHandler(config = {}, next) {
+  const dashboard = createDashboardHandler(config);
   const links = { inviteUrl: discordLink(config.inviteUrl, 'invite'), supportUrl: discordLink(config.supportUrl, 'support') };
   let cached;
   let pending;
@@ -53,6 +56,7 @@ export function createHandler(config = {}, next) {
     let url;
     try { url = new URL(req.url, 'http://localhost'); }
     catch { return json(res, 400, { detail: 'Đường dẫn không hợp lệ.' }); }
+    if (await dashboard(req, res, url)) return;
     if (!url.pathname.startsWith('/api/')) return next ? next(req, res) : json(res, 404, { detail: 'Không tìm thấy trang.' });
     if (!['/api/site', '/api/status'].includes(url.pathname)) return json(res, 404, { detail: 'Không tìm thấy chức năng.' });
     if (!['GET', 'HEAD'].includes(req.method)) return json(res, 405, { detail: 'Chức năng này chỉ cho phép đọc.' });

@@ -9,7 +9,7 @@ export const features = [
 
 export const faqs = [
   { category: 'Bắt đầu', question: 'Coconerd làm gì cho server của mình?', answer: 'Coconerd giúp gom các tin nhắn liên quan thành chủ đề, giữ mạch hội thoại và tạo tóm tắt để mọi người dễ theo dõi. Bạn có thể thử một không gian minh họa ngay trên website.' },
-  { category: 'Bắt đầu', question: 'Có cần tài khoản để dùng website không?', answer: 'Không. Bạn có thể xem tính năng, đọc hướng dẫn và trải nghiệm mẫu ngay, không cần đăng nhập. Dữ liệu trong bản trải nghiệm là minh họa, không kết nối với tài khoản Discord của bạn.' },
+  { category: 'Bắt đầu', question: 'Có cần tài khoản để dùng website không?', answer: 'Trang công khai và trải nghiệm mẫu không cần đăng nhập. Dashboard dữ liệu thật yêu cầu đăng nhập Discord; chỉ chủ server hoặc người có quyền Administrator được quản trị server của mình. Dữ liệu trong bản trải nghiệm là minh họa, không kết nối với tài khoản Discord của bạn.' },
   { category: 'Bắt đầu', question: 'Làm sao thêm Coconerd vào Discord?', answer: 'Nhấn Thêm vào Discord để kiểm tra lời mời chính thức. Hiện link mời chưa được công bố. Trong lúc chờ, bạn có thể xem cách hoạt động và thử các cuộc trò chuyện mẫu.' },
   { category: 'Hội thoại', question: 'Tin nhắn gốc có bị di chuyển hoặc xóa không?', answer: 'Luồng tổ chức hội thoại giữ tin nhắn gốc ở kênh ban đầu. Bot Discord có thể tạo thread và đăng bản sao có liên kết đến nguồn để mọi người tiếp tục theo dõi.' },
   { category: 'Hội thoại', question: 'Vì sao một tin nhắn chưa có chủ đề?', answer: 'Tin nhắn được tiếp nhận trước rồi mới được phân loại. Tin quá ngắn hoặc thiếu ngữ cảnh có thể cần chờ thêm hội thoại; không phải mọi tin đều được gán thành một chủ đề.' },

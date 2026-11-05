@@ -73,7 +73,7 @@ function Privacy() {
     ['Nội dung được lưu', 'Dữ liệu hội thoại gồm ID server, kênh, tin nhắn và tác giả; tên hiển thị, nội dung, thời gian và liên kết trả lời. Chủ đề, tóm tắt và tác vụ cho bot được giữ để tiếp nối cuộc trò chuyện.'],
     ['AI và ngữ cảnh', 'Khi sử dụng model thật, nội dung cùng ngữ cảnh được chọn được gửi tới dịch vụ AI Meta đã cấu hình. Quản trị viên cần chọn kênh phù hợp và thông báo cách xử lý cho thành viên. Tóm tắt có thể chưa đầy đủ; hãy đối chiếu với tin gốc.'],
     ['Thời gian lưu trữ', 'Quản trị viên có thể cấu hình thời gian giữ tin từ 1 đến 3.650 ngày. Tiến trình xử lý sẽ dọn dữ liệu hết hạn. Thành viên nên liên hệ quản trị viên server để biết cấu hình đang áp dụng.'],
-    ['Website và bản trải nghiệm', 'Website không yêu cầu tài khoản và không hiển thị hội thoại riêng của server Discord. Nội dung trong bản trải nghiệm là minh họa; những thay đổi được lưu cục bộ trong trình duyệt và có thể đặt lại. Website dùng Google Fonts để hiển thị kiểu chữ; không tích hợp quảng cáo hay công cụ analytics.'],
+    ['Website và bản trải nghiệm', 'Trang công khai và bản trải nghiệm không yêu cầu tài khoản, không hiển thị hội thoại riêng. Dashboard dữ liệu thật yêu cầu đăng nhập Discord và quyền chủ server hoặc Administrator; mỗi người chỉ truy cập server mình được phép quản trị. Nội dung trong bản trải nghiệm là minh họa; những thay đổi được lưu cục bộ trong trình duyệt và có thể đặt lại. Website dùng Google Fonts để hiển thị kiểu chữ; không tích hợp quảng cáo hay công cụ analytics.'],
   ].map(([title, copy], index) => <section key={title}><span>0{index + 1}</span><div><h2>{title}</h2><p>{copy}</p></div></section>)}</div></PublicLayout>;
 }
 

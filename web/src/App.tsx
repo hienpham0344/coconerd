@@ -5,6 +5,7 @@ import { PageMotion } from './components/PageMotion';
 import { InviteDialog } from './components/InviteDialog';
 import { resolveNavigation } from './routes';
 const Dashboard = lazy(() => import('./pages/Dashboard'));
+const LiveDashboard = lazy(() => import('./pages/LiveDashboard'));
 const PublicPages = lazy(() => import('./pages/PublicPages'));
 
 export function App() {
@@ -21,7 +22,7 @@ export function App() {
   const { route } = navigation;
   return <><Suspense fallback={<div className="full-loading"><Loading /></div>}>
     <PageMotion route={route}>
-      {route === '/' ? <Landing /> : /^\/demo(?:\/|$)/.test(route) ? <Dashboard route={route} /> : <PublicPages route={route} />}
+      {route === '/' ? <Landing /> : /^\/app(?:\/|$)/.test(route) ? <LiveDashboard route={route} /> : /^\/demo(?:\/|$)/.test(route) ? <Dashboard route={route} /> : <PublicPages route={route} />}
     </PageMotion>
   </Suspense>{navigation.inviteOpen && <InviteDialog onClose={() => { location.hash = route; }} />}</>;
 }

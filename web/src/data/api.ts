@@ -1,14 +1,16 @@
-import { demoGuilds, demoMessages, demoSummary, demoTopics } from './demo';
+import { demoGuilds, demoMessages, demoSummary, demoTopics } from './demo.ts';
 import type { Guild, Message, Overview, Summary, Topic, TopicPage } from '../types';
 
 export class ApiError extends Error {
-  constructor(public status: number, message: string) { super(message); }
+  status: number;
+  constructor(status: number, message: string) { super(message); this.status = status; }
 }
 
 export async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   let response: Response;
   try { response = await fetch(path, { ...init, signal: init.signal || AbortSignal.timeout(10_000) }); }
   catch { throw new ApiError(0, 'Chưa kết nối được website. Thử lại sau một chút nhé.'); }
+  if (response.status === 204) return undefined as T;
   let data;
   try { data = await response.json(); }
   catch { throw new ApiError(502, 'Chưa đọc được phản hồi từ website.'); }
@@ -29,7 +31,17 @@ export function demoGuildForTopic(topicId?: string) {
   return stored('topics', demoTopics).find(topic => topic.topic_id === topicId)?.guild_id;
 }
 
-export function client() {
+export interface DashboardClient {
+  guilds(): Promise<Guild[]>;
+  overview(guild: Guild): Promise<Overview>;
+  topics(guildId: string, query?: string, status?: string, offset?: number): Promise<TopicPage>;
+  topic(guildId: string, topicId: string): Promise<Topic>;
+  messages(topic: Topic, before?: string): Promise<Message[]>;
+  summary(topic: Topic): Promise<Summary | null>;
+  close(topic: Topic): Promise<void>;
+}
+
+export function client(): DashboardClient {
   return {
     guilds: async (): Promise<Guild[]> => structuredClone(demoGuilds),
     overview: async (guild: Guild): Promise<Overview> => {
