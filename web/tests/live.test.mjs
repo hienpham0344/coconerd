@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { liveClient } from '../src/data/live.ts';
+import { clientForMode, liveClient } from '../src/data/live.ts';
 
 test('live reads use private routes and guild scope; failures cannot fall back to demo', async t => {
   const original = globalThis.fetch;
@@ -25,4 +25,11 @@ test('live reads use private routes and guild scope; failures cannot fall back t
   await api.close({ guild_id: '123456789012345678', topic_id: 't1' });
   assert.equal(calls.at(-1).init.method, 'POST');
   assert.equal(calls.at(-1).init.headers['X-CSRF-Token'], 'csrf-token');
+});
+
+test('live views without an injected client still call private APIs instead of sample data', async t => {
+  const original = globalThis.fetch;
+  t.after(() => { globalThis.fetch = original; });
+  globalThis.fetch = async () => new Response('{"detail":"Private API required"}', { status: 503 });
+  await assert.rejects(() => clientForMode('live').guilds(), /Private API required/);
 });

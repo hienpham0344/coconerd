@@ -4,7 +4,8 @@ import { Brand, Flower } from '../components/Brand';
 import { ErrorState, Loading, errorMessage, timeAgo } from '../components/Feedback';
 import { GuildSettings } from '../components/GuildSettings';
 import { ReviewPanel } from '../components/ReviewPanel';
-import { client, resetDemo, demoGuildForTopic, type DashboardClient } from '../data/api';
+import { resetDemo, demoGuildForTopic, type DashboardClient } from '../data/api';
+import { clientForMode } from '../data/live';
 import type { Guild, LoginSession, Mode, Overview, TopicPage, TopicStatus } from '../types';
 import TopicDetail from './TopicDetail';
 
@@ -13,7 +14,7 @@ export function Status({ status }: { status: TopicStatus }) { return <span class
 export const guildName = (guild: Guild) => guild.name || 'Server ' + guild.guild_id;
 
 export default function Dashboard({ route, mode = 'demo', api: providedApi, session, onLogout }: { route: string; mode?: Mode; api?: DashboardClient; session?: LoginSession; onLogout?: () => void }) {
-  const api = useMemo(() => providedApi || client(), [providedApi]);
+  const api = useMemo(() => clientForMode(mode, session?.csrfToken, providedApi), [mode, session?.csrfToken, providedApi]);
   const requestedGuild = mode === 'live' ? route.match(/^\/app\/guilds\/(\d{15,22})(?:\/|$)/)?.[1] : undefined;
   const topicId = mode === 'live' ? route.match(/^\/app\/guilds\/\d+\/topics\/([\w-]+)$/)?.[1] : route.match(/^\/demo\/topics\/([\w-]+)$/)?.[1];
   const view = route.endsWith('/settings') ? 'settings' : route.endsWith('/review') ? 'review' : route.includes('/topics') ? 'topics' : 'overview';

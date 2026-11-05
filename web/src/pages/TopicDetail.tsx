@@ -5,7 +5,8 @@ import { Flower } from '../components/Brand';
 import { ErrorState, Loading, errorMessage } from '../components/Feedback';
 import { ReviewPanel } from '../components/ReviewPanel';
 import { SyncPanel } from '../components/SyncPanel';
-import { client, type DashboardClient } from '../data/api';
+import type { DashboardClient } from '../data/api';
+import { clientForMode } from '../data/live';
 import { Status } from './Dashboard';
 import type { Message, Mode, Summary, Topic } from '../types';
 
@@ -22,7 +23,7 @@ function attachmentUrl(value?: string) {
 }
 
 export default function TopicDetail({ guildId, topicId, mode, api: providedApi, csrf, onClose, onChanged }: { guildId: string; topicId: string; mode: Mode; api?: DashboardClient; csrf?: string; onClose: () => void; onChanged: () => void }) {
-  const api = useMemo(() => providedApi || client(), [providedApi]);
+  const api = useMemo(() => clientForMode(mode, csrf, providedApi), [mode, csrf, providedApi]);
   const [topic, setTopic] = useState<Topic | null>(null); const [messages, setMessages] = useState<Message[]>([]); const [summary, setSummary] = useState<Summary | null>(null);
   const [tab, setTab] = useState('summary'); const [reviewId, setReviewId] = useState('');
   const [error, setError] = useState(''); const [operationError, setOperationError] = useState(''); const [busy, setBusy] = useState(true);

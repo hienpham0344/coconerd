@@ -1,5 +1,9 @@
-import { ApiError, request, type DashboardClient } from './api.ts';
-import type { Guild, Message, Overview, Summary, Topic, TopicPage } from '../types';
+import { ApiError, client, request, type DashboardClient } from './api.ts';
+import type { Guild, Message, Mode, Overview, Summary, Topic, TopicPage } from '../types';
+
+export function clientForMode(mode: Mode, csrf = '', provided?: DashboardClient): DashboardClient {
+  return provided || (mode === 'live' ? liveClient(csrf) : client());
+}
 
 export async function privateRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
   try { return await request<T>(path, { ...init, credentials: 'same-origin', cache: 'no-store' }); }
