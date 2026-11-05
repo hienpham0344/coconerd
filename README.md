@@ -5,10 +5,10 @@
 **Bot Discord, backend tổ chức hội thoại và website công khai trong cùng repository.** API nhận và lưu message trước; worker phân loại, cập nhật topic/summary và tạo action để bot xử lý.
 
 > [!NOTE]
-> `backend/` chứa API và worker Python; `bot/` chứa bot Discord; `web/` chứa website React/TypeScript và máy chủ web Node.js. Website công khai không yêu cầu đăng nhập, không dùng bot token và không truy cập hội thoại riêng. Các thành phần vẫn chạy và triển khai độc lập. Hợp đồng tích hợp bot nằm trong [HTTP API](docs/API_CONTRACT.md).
+> `backend/` chứa API và worker Python; `bot/` chứa bot Discord; `web/` chứa website React/TypeScript và máy chủ web Node.js. Trang công khai/demo không yêu cầu đăng nhập. Dashboard thật tại `/#/app` yêu cầu Discord OAuth và quyền owner/Administrator của từng server; xem cấu hình trong [web/README.md](web/README.md). Các thành phần vẫn chạy và triển khai độc lập. Hợp đồng tích hợp bot nằm trong [HTTP API](docs/API_CONTRACT.md).
 
 ```text
-Discord bot → Backend API → SQLite job queue → AI worker → Topics, summaries, actions → Discord bot
+Discord bot → Backend API → Railway PostgreSQL → AI worker → Topics, summaries, actions → Discord bot
 ```
 
 ## Website công khai
@@ -55,7 +55,7 @@ python -m pip install -e '.[dev]'
 if [ ! -f .env ]; then cp .env.example .env; fi
 ```
 
-Sửa `.env`: đặt hai key ngẫu nhiên, khác nhau cho `COCONERD_BOT_API_KEY` và `COCONERD_ADMIN_API_KEY`. Để kiểm tra luồng offline, giữ `COCONERD_MOCK_LLM=true`, `COCONERD_APP_ENV=development`. File mẫu không chứa credential thật; không commit `.env`.
+Sửa `.env`: đặt Railway PostgreSQL URL theo [hướng dẫn database](docs/RAILWAY_POSTGRES.md), cùng hai key ngẫu nhiên, khác nhau cho `COCONERD_BOT_API_KEY` và `COCONERD_ADMIN_API_KEY`. `COCONERD_REQUIRE_POSTGRES=true` chặn việc dùng nhầm SQLite. Để kiểm tra model bằng mock, giữ `COCONERD_MOCK_LLM=true`, `COCONERD_APP_ENV=development`. File mẫu không chứa credential thật; không commit `.env`.
 
 ```bash
 mkdir -p data
@@ -81,6 +81,11 @@ Khi API kết nối DB và worker có heartbeat, kết quả là `{"status":"ok"
 
 Muốn dùng Meta thật: đặt `COCONERD_MODEL_API_KEY`, đổi `COCONERD_MOCK_LLM=false`, restart worker. Cấu hình mặc định: `muse-spark-1.3`, effort `low`, tối đa 2.048 output tokens/call. Xem [cấu hình model](docs/MODEL_CONFIGURATION.md), gồm override theo guild.
 
+Router task mặc định bật bằng `COCONERD_AGENT_MODE=task`: tách `chat`,
+`topic_classification`, `topic_memory` với profile riêng, deadline và giới hạn input/output.
+Đặt `COCONERD_TASK_PROFILES` bằng JSON để cấu hình từng task; `single` dùng thông số base.
+Phân loại và cập nhật memory vẫn dùng chung một lượt Meta; xem [hướng dẫn điều phối task](docs/TASK_ORCHESTRATION.md).
+
 ## Chạy Discord bot
 
 ```bash
@@ -89,9 +94,26 @@ python -m bot.main
 ```
 
 Đặt `DISCORD_BOT_TOKEN`, `BACKEND_BASE_URL`, `COCONERD_BOT_API_KEY` và
-`COCONERD_ADMIN_API_KEY` trong `.env`. API và worker phải chạy riêng. Groq chỉ
-phục vụ phản hồi personality của bot; worker phân loại vẫn dùng Meta hoặc mock.
+`COCONERD_ADMIN_API_KEY` trong `.env`. API và worker phải chạy riêng. Mọi tính năng
+AI đều dùng Meta: chat khi tag bot, phân loại topic và cập nhật summary/memory.
+Chat và worker dùng chung `COCONERD_MODEL_API_KEY`, `COCONERD_META_MODEL_NAME`
+(mặc định `muse-spark-1.3`), `COCONERD_LLM_REASONING_EFFORT` và `COCONERD_LLM_MAX_TOKENS`.
+`COCONERD_MOCK_LLM=true` chỉ giả lập worker khi test offline; chat cần key Meta thật.
+Khi thiếu key, Meta lỗi hoặc phản hồi quá hạn, chat dùng câu meme tĩnh có sẵn,
+không chuyển sang model khác. Package `openai` chỉ làm SDK tương thích để gọi
+`https://api.meta.ai/v1`; không dùng model OpenAI. Sau khi sửa `.env`, restart bot và worker.
 Quản trị viên dùng `/setup` để chọn các Input Channel và một Output Channel riêng.
+Bot tự đăng tiêu đề topic vào Output Channel, tạo Thread gắn với tin tiêu đề,
+rồi sao chép tin thành viên vào Thread theo dạng `[tên]-tin nhắn`.
+Chỉ nội dung đáng ghi nhớ mới tạo/cập nhật topic: thảo luận có thông tin, lịch họp/học,
+ăn uống, đề xuất, quyết định và việc cần làm. Chào hỏi, đùa và chuyện phiếm được bỏ qua;
+câu hỏi thực tế chưa có câu trả lời vẫn được giữ. AI phân biệt theo ngữ cảnh, không chỉ từ khóa.
+Tin đầu trong Output Channel có ghi chú tự cập nhật, tách nội dung chính, đề xuất,
+điều đã chốt, việc cần làm và câu hỏi còn mở; tin gốc được giữ trong Thread để đối chiếu.
+Gọi `/summarize` ngay trong Thread để đăng thêm bản tóm tắt, không cần nhập số topic.
+Khi đổi Output Channel, action tiếp theo sẽ tạo Thread tại nơi mới và sao chép lịch sử.
+Bot lưu receipt qua HTTP API vào bảng `delivery_receipts` trong cùng PostgreSQL;
+không tạo database SQLite riêng. Backend/DB lỗi thì delivery dừng để retry.
 Dùng `/summarize topic_id:0` để xem danh sách topic trong Input Channel;
 `/summarize topic_id:1` xem và xuất summary của topic đầu tiên.
 
@@ -146,7 +168,7 @@ Router gọi application service; service dùng port/DTO; infrastructure triển
 2. Bot gửi từng message gốc đến `POST /api/v1/messages` với `X-API-Key`.
 3. `202` xác nhận đã lưu; worker phân loại sau đó. `defer`/`irrelevant` có thể không sinh action.
 4. Bot poll `POST /api/v1/actions/claim`, thực hiện action, rồi `/complete` hoặc `/fail` với đúng `worker_id` và `lease_token`.
-5. Bot lưu bền vững `action_id → kết quả Discord`, `topic_id → thread_id` và ID message summary; retry không tạo thêm side effect đã hoàn tất.
+5. Bot lưu receipt bền vững cho tiêu đề, Thread, từng tin nguồn/phần tin và summary; retry dùng lại ID đã lưu. Vẫn có cửa sổ crash giữa Discord request và ghi receipt.
 
 **Backend không gửi Discord request.** Bot tự xử lý quyền, Discord rate limit, định dạng nội dung và chống vòng lặp ingest message do chính bot gửi. Ví dụ đầy đủ, lease và checklist pilot nằm trong [BOT_INTEGRATION.md](docs/BOT_INTEGRATION.md).
 
@@ -182,4 +204,4 @@ Suite offline không gọi Meta/Discord thật. Mốc kiểm chứng ngày 2026-
 - [Agent workflow](docs/AGENT_WORKFLOW.md) · [Model configuration](docs/MODEL_CONFIGURATION.md).
 - [Manual review](docs/MANUAL_REVIEW.md) · [Readiness và hạn chế](docs/BACKEND_READINESS.md).
 
-SQLite hiện dành cho một host dùng file local; URL khác SQLite bị cấu hình từ chối. Ứng dụng không tự migrate schema. Sao lưu DB trước khi nâng cấp; triển khai qua mạng cần TLS và giới hạn truy cập API. Chưa có giao thức sửa/xóa message Discord, OCR/attachment extraction, hay bảo đảm exactly-once trên Discord.
+Runtime hiện dùng Railway PostgreSQL với `COCONERD_REQUIRE_POSTGRES=true`, từ chối cấu hình SQLite. SQLite vẫn dùng cho kiểm thử độc lập và bản sao lịch sử. Xem [cấu hình Railway và chuyển lịch sử](docs/RAILWAY_POSTGRES.md). Ứng dụng không tự migrate schema. Chưa có giao thức sửa/xóa message Discord, OCR/attachment extraction, hay bảo đảm exactly-once trên Discord.

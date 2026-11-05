@@ -5,8 +5,18 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import case, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.application.clarification import DEFER_WINDOW_SECONDS, is_clarification, utc
-from backend.infrastructure.database.models import MessageRecord, ProcessingJobRecord
+from backend.application.clarification import (
+    DEFER_WINDOW_SECONDS,
+    is_clarification,
+    is_conversation_followup,
+    utc,
+)
+from backend.infrastructure.database.models import (
+    MessageRecord,
+    MessageTopicAssociationRecord,
+    ProcessingJobRecord,
+    TopicRecord,
+)
 from backend.infrastructure.database.repositories.messages import _message_read_model
 
 
@@ -16,7 +26,26 @@ class DeferredJobs:
 
     async def _matches(self, target: MessageRecord, followup: MessageRecord) -> bool:
         if not is_clarification(_message_read_model(target), _message_read_model(followup)):
-            return False
+            if not is_conversation_followup(
+                _message_read_model(target), _message_read_model(followup)
+            ):
+                return False
+            # Only a successfully assigned turn can trigger a natural follow-up.
+            # Mere ingestion, repeated words and arbitrary nearby chatter cannot.
+            return (
+                await self.session.scalar(
+                    select(MessageTopicAssociationRecord.id)
+                    .join(TopicRecord, TopicRecord.id == MessageTopicAssociationRecord.topic_id)
+                    .where(
+                        MessageTopicAssociationRecord.guild_id == target.guild_id,
+                        MessageTopicAssociationRecord.message_record_id == followup.id,
+                        TopicRecord.guild_id == target.guild_id,
+                        TopicRecord.status != "CLOSED",
+                    )
+                    .limit(1)
+                )
+                is not None
+            )
         if followup.reply_to_message_id:
             return True
         # Without an explicit reply, do not skip a newer message or resolve timestamp ties.
@@ -86,8 +115,6 @@ class DeferredJobs:
                     MessageRecord.created_at > target.created_at,
                     MessageRecord.created_at
                     <= utc(target.created_at) + timedelta(seconds=DEFER_WINDOW_SECONDS),
-                    (MessageRecord.reply_to_message_id == target.discord_message_id)
-                    | (MessageRecord.author_id == target.author_id),
                 )
                 .order_by(
                     case(
@@ -123,9 +150,10 @@ class DeferredJobs:
         )
         if followup.reply_to_message_id:
             query = query.where(MessageRecord.discord_message_id == followup.reply_to_message_id)
-        else:
-            query = query.where(MessageRecord.author_id == followup.author_id)
-        rows = await self.session.execute(query.order_by(MessageRecord.created_at.desc()).limit(1))
+        rows = await self.session.execute(query.order_by(MessageRecord.created_at.desc()).limit(30))
+        woken = 0
         for job_id, target in rows:
             if await self._matches(target, followup):
-                await self._wake(job_id, followup_id)
+                woken += await self._wake(job_id, followup_id)
+                if woken == 6:
+                    break

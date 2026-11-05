@@ -6,6 +6,13 @@ Base path: `/api/v1`. JSON is UTF-8. Bot routes require `X-API-Key`; administrat
 
 Topic summary reads share the bot request rate limit. Empty or whitespace-only configured credentials fail closed with `503`; invalid supplied keys, including non-ASCII values, return `401`.
 
+Delivery receipts use `GET /delivery-receipts/{key}` and
+`PUT /delivery-receipts/{key}` with `X-API-Key`. Body/response:
+`{"discord_id":"2000"}`. A missing key returns `404`; storage failures must not
+be treated as missing receipts. Keys are bounded to 500 ASCII letters, digits,
+colons, underscores or hyphens; values are 1–100 characters. Receipt requests use
+a separate limit of 600/minute so they do not exhaust message ingestion's quota.
+
 ## Configure guild access
 
 `PUT /admin/guilds/{guild_id}/settings`
@@ -19,6 +26,8 @@ The backend rejects ingestion for a guild or channel absent from this allowlist.
 ## Ingest message
 
 `POST /messages` returns `202` after message and durable processing-job rows commit. Duplicate `(guild_id, message_id)` deliveries return the same accepted shape without adding another message or job.
+
+Optional `attachments` defaults to `[]` and accepts up to 10 Discord file metadata objects: `{"id":"55","filename":"photo.png","url":"https://cdn.discordapp.com/attachments/1/55/photo.png","content_type":"image/png","size":1234,"spoiler":false}`. `content` may be empty for file-only messages. Metadata persists with the message, appears as `source_attachments` in action payloads and `attachments` in topic message history, and is redacted from expired actions by retention. URLs are references, not an instruction for the backend to fetch remote content. No OCR/vision/web extraction is performed. Bot delivery refreshes the source message through Discord and re-uploads its attachments with per-file receipts, or posts a labelled link when a file cannot be copied. Existing text-only clients remain valid. Existing databases need additive migration `20261105_0006` before deploying this version.
 
 ```json
 {
@@ -42,6 +51,7 @@ Ambiguous messages may remain deferred. An explicit reply to the target, or a sa
 ## Claim and acknowledge Discord actions
 
 - `POST /actions/claim` request: `{"worker_id":"bot-worker-01","limit":20}`.
+- WebSocket `/api/v1/actions/events`: authenticate with the `X-API-Key` header (never a query parameter). Receives `{"type":"actions_available"}` on connection and when committed work is signaled; `{"type":"heartbeat"}` every 20 seconds while idle. This is a wakeup hint, not action delivery or acknowledgement. Coalesced/missed hints are safe: continue HTTP claim/complete/fail and fallback polling. PostgreSQL LISTEN/NOTIFY carries hints across worker/API processes; SQLite falls back to polling. WebSocket routes are not included in OpenAPI.
 - `POST /actions/{action_id}/complete` request: `{"worker_id":"bot-worker-01","lease_token":"00000000-0000-4000-8000-000000000001","discord_thread_id":"thread_001","discord_message_id":null}`.
 - `POST /actions/{action_id}/fail` request: `{"worker_id":"bot-worker-01","lease_token":"00000000-0000-4000-8000-000000000001","error_type":"DiscordUnavailable","error_message":"temporary failure","retryable":true}`.
 
@@ -68,7 +78,8 @@ Example action:
 }
 ```
 
-The bot posts a clearly attributed copy and source link; Discord cannot move the original message into a thread.
+The bot posts a copy formatted as `[display name]-message` inside a topic Thread
+attached to a title message in the configured Output Channel. Original messages remain.
 
 Claim has no top-level thread ID or lease deadline. Fetch the thread from `GET /topics/{topic_id}?guild_id=...` or the bot's persisted mapping; complete within the configured action lease (default 60 seconds). There is no lease-renewal endpoint. Preserve receipts for completed Discord operations before retrying ACKs; lease fencing does not guarantee exactly-once Discord effects.
 
@@ -79,6 +90,13 @@ Claim is global to this backend: it has no guild/channel filter, and `worker_id`
 - `GET /topics/{topic_id}?guild_id=...`
 - `GET /topics/{topic_id}/messages?guild_id=...&limit=50&before=...`
 - `GET /topics/{topic_id}/summary?guild_id=...`
+- `GET /threads/{thread_id}/topic?guild_id=...` resolves the persisted Thread mapping
+  in that guild and returns topic metadata including its origin `channel_id`.
+  Missing/cross-guild mappings return 404. The bot uses this for `/summarize` inside
+  a topic Thread. Automatic `UPSERT_SUMMARY` actions edit the note on the existing
+  starter message in the Output Channel, using a version receipt to avoid duplicate
+  or stale edits. `CREATE_THREAD`/`APPEND_MESSAGE` payloads also include the current
+  `summary`, so a new starter message can show useful context immediately.
 - `GET /api/v1/health`
 
 All topic reads require `guild_id`; cross-guild IDs return `404`. Message pagination accepts `limit` from 1–100 and an ISO-8601 `before` timestamp.
@@ -129,7 +147,29 @@ Action lease fencing uses status, owner, expiry and per-claim token; reusing wor
   This does not replace Discord ACL checks for messages grouped across channels.
 - Completing a leased `CREATE_THREAD` action persists the mapping atomically. A topic
   already mapped to a different thread returns 409 without completing the action.
+  To replace a mapping, completion may include `previous_discord_thread_id` (nullable)
+  and `discord_channel_id` together with the new `discord_thread_id`. The previous
+  mapping must match and the destination must equal the guild's configured Output
+  Channel. Lease checks, mapping replacement and action completion are transactional;
+  stale mappings or a different destination return 409. This applies to all delivery
+  action types, allowing an append or summary to recover an old/deleted Thread.
   No separate, unfenced thread-mapping endpoint is exposed.
 
 Run `alembic upgrade head` when upgrading an existing database. The channel migration
 preserves messages and topics and derives legacy origins from the earliest association.
+
+## Internal dashboard API
+
+The main backend now mounts `/api/v1/admin/web/guilds` (paginated `limit`, `offset`),
+`/guilds/{guild_id}/settings`, `/overview` and `/topics` (search/status/pagination).
+All require `X-Admin-API-Key`; these are service-to-service endpoints.
+The web Node gateway authenticates Discord sessions, verifies owner/Administrator
+for the exact guild and forwards only supported operations with mandatory guild scope.
+
+`/api/v1/admin/web/credentials/{kind}/{sha256_id}` stores encrypted OAuth/session
+payloads with expiry. Kinds are `oauth` (max 5 minutes) and `session` (max 12 hours).
+PUT accepts `payload`, `expires_at`, and optional `expected_payload` for compare-and-set
+refresh; a changed/revoked credential returns 409. GET ignores expired credentials,
+DELETE revokes a credential, and POST `/credentials/oauth/{sha256_id}/consume`
+atomically consumes one state. The browser gateway never exposes these routes.
+No access/refresh token is stored in plaintext or returned to the browser.

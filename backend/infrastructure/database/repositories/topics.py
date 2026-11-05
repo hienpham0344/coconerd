@@ -95,6 +95,14 @@ class TopicRepository:
         record = await self.get(guild_id, topic_id)
         return _topic_read_model(record) if record is not None else None
 
+    async def get_by_thread(self, guild_id: str, thread_id: str) -> TopicReadModel | None:
+        record = await self.session.scalar(
+            select(TopicRecord).where(
+                TopicRecord.guild_id == guild_id, TopicRecord.discord_thread_id == thread_id
+            )
+        )
+        return _topic_read_model(record) if record is not None else None
+
     async def get(self, guild_id: str, topic_id: str) -> TopicRecord | None:
         return await self.session.scalar(
             select(TopicRecord).where(TopicRecord.guild_id == guild_id, TopicRecord.id == topic_id)
@@ -191,6 +199,21 @@ class TopicRepository:
         )
         if episode is not None:
             episode.ended_at = ended_at
+
+    async def replace_thread(
+        self, guild_id: str, topic_id: str, previous: str | None, thread_id: str
+    ) -> bool:
+        result = await self.session.execute(
+            update(TopicRecord)
+            .where(
+                TopicRecord.guild_id == guild_id,
+                TopicRecord.id == topic_id,
+                TopicRecord.discord_thread_id == previous,
+            )
+            .values(discord_thread_id=thread_id)
+            .execution_options(synchronize_session=False)
+        )
+        return result.rowcount == 1
 
     async def set_thread(self, guild_id: str, topic_id: str, thread_id: str) -> None:
         await self.session.execute(

@@ -50,6 +50,8 @@ yarn-error.log*
 *.sqlite3
 *.db
 *.db-journal
+*.db-wal
+*.db-shm
 data/*.db
 
 # Environment & Secrets

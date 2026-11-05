@@ -62,6 +62,8 @@ def create_router(dependencies: ApiDependencies) -> APIRouter:
             body.discord_thread_id,
             body.discord_message_id,
             lease_token=body.lease_token,
+            previous_discord_thread_id=body.previous_discord_thread_id,
+            discord_channel_id=body.discord_channel_id,
         )
         return asdict(result)
 

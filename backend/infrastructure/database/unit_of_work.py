@@ -19,6 +19,7 @@ from backend.application.read_models import (
 from backend.domain.entities import ConversationMessage, ConversationTopic
 from backend.domain.enums import ActionType
 from backend.infrastructure.database.repositories.actions import ActionRepository
+from backend.infrastructure.database.repositories.delivery_receipts import DeliveryReceiptRepository
 from backend.infrastructure.database.repositories.guilds import GuildRepository
 from backend.infrastructure.database.repositories.health import HealthRepository
 from backend.infrastructure.database.repositories.jobs import JobRepository
@@ -109,6 +110,11 @@ class _TopicsPort:
     async def set_thread(self, guild_id: str, topic_id: str, thread_id: str) -> None:
         await self._repository.set_thread(guild_id, topic_id, thread_id)
 
+    async def replace_thread(
+        self, guild_id: str, topic_id: str, previous: str | None, thread_id: str
+    ) -> bool:
+        return await self._repository.replace_thread(guild_id, topic_id, previous, thread_id)
+
     async def delete_data(self, guild_id: str, topic_id: str) -> None:
         await self._repository.delete_data(guild_id, topic_id)
 
@@ -120,6 +126,9 @@ class _TopicsPort:
 
     async def get(self, guild_id: str, topic_id: str) -> TopicReadModel | None:
         return await self._repository.get_read_model(guild_id, topic_id)
+
+    async def get_by_thread(self, guild_id: str, thread_id: str) -> TopicReadModel | None:
+        return await self._repository.get_by_thread(guild_id, thread_id)
 
     async def create(self, topic: ConversationTopic) -> TopicReadModel:
         return await self._repository.create_read_model(topic)
@@ -242,6 +251,7 @@ class _SummariesPort:
 class SqlAlchemyUnitOfWork:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
+        self.delivery_receipts = DeliveryReceiptRepository(session)
         self.messages = _MessagesPort(session)
         self.topics = _TopicsPort(session)
         self.reviews = ReviewRepository(session)

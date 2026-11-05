@@ -23,7 +23,9 @@ async def prune_retained_data(uow: UnitOfWork) -> int:
             await uow.actions.update(
                 action.id,
                 payload={
-                    key: value for key, value in action.payload.items() if key != "source_content"
+                    key: value
+                    for key, value in action.payload.items()
+                    if key not in {"source_content", "source_attachments"}
                 },
             )
             if action.status in {"PENDING", "CLAIMED"}:

@@ -56,6 +56,7 @@ async def test_provider_sends_grounded_hints_beside_original_in_one_request(monk
         return SimpleNamespace(
             choices=[
                 SimpleNamespace(
+                    finish_reason="stop",
                     message=SimpleNamespace(
                         content=json.dumps(
                             {
@@ -64,7 +65,7 @@ async def test_provider_sends_grounded_hints_beside_original_in_one_request(monk
                                 "reason": "uncertain",
                             }
                         )
-                    )
+                    ),
                 )
             ],
             usage=None,

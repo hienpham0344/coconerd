@@ -66,8 +66,8 @@ class ScenarioProvider:
 
 
 @pytest.fixture
-def migrated_settings(tmp_path, monkeypatch):
-    url = f"sqlite+aiosqlite:///{tmp_path / 'bot.db'}"
+def migrated_settings(tmp_path, monkeypatch, postgres_database_url):
+    url = postgres_database_url or f"sqlite+aiosqlite:///{tmp_path / 'bot.db'}"
     monkeypatch.setenv("COCONERD_DATABASE_URL", url)
     get_settings.cache_clear()
     try:
@@ -184,7 +184,8 @@ async def test_migrated_http_worker_memory_outbox_retry_and_ack(runtime):
         assert "Thanh phụ trách API." in latest.data["overview"]
         assert "thứ Năm" not in latest.data["overview"]
         assert latest.source_message_ids == ["first", "second"]
-        assert not (await session.execute(text("PRAGMA foreign_key_check"))).all()
+        if session.get_bind().dialect.name == "sqlite":
+            assert not (await session.execute(text("PRAGMA foreign_key_check"))).all()
         assert set(await session.scalars(select(ProcessingJobRecord.status))) == {"SUCCEEDED"}
         assert list(await session.scalars(select(ProcessingJobRecord.model_call_count))) == [1, 1]
         topic_id = latest.topic_id

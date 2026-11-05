@@ -185,6 +185,7 @@ async def test_processing_writes_new_topic_decision_summary_and_actions_atomical
         ),
         summaries=SimpleNamespace(latest=none, add=add_summary),
         actions=SimpleNamespace(add=add_action, pending_create=none),
+        jobs=SimpleNamespace(wake_deferred=none),
         commit=commit,
     )
     result = await process_message_record(uow, "record-1", FakeProvider())

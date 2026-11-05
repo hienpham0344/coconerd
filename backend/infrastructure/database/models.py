@@ -24,6 +24,16 @@ class Base(DeclarativeBase):
     pass
 
 
+class DeliveryReceiptRecord(Base):
+    __tablename__ = "delivery_receipts"
+
+    key: Mapped[str] = mapped_column(String(500), primary_key=True)
+    discord_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False
+    )
+
+
 class GuildSettingsRecord(Base):
     __tablename__ = "guild_settings"
 
@@ -34,6 +44,17 @@ class GuildSettingsRecord(Base):
     retention_days: Mapped[int] = mapped_column(Integer, default=365, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, nullable=False
+    )
+
+
+class DashboardCredentialRecord(Base):
+    __tablename__ = "dashboard_credentials"
+
+    kind: Mapped[str] = mapped_column(String(10), primary_key=True)
+    key_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    payload: Mapped[str] = mapped_column(Text, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True
     )
 
 
@@ -52,6 +73,9 @@ class MessageRecord(Base):
     author_id: Mapped[str] = mapped_column(String(100), nullable=False)
     author_name: Mapped[str] = mapped_column(String(200), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
+    attachments: Mapped[list[dict]] = mapped_column(
+        JSON, default=list, server_default="[]", nullable=False
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     reply_to_message_id: Mapped[str | None] = mapped_column(String(100))
     ingested_at: Mapped[datetime] = mapped_column(
@@ -243,7 +267,11 @@ class ModelConfigRecord(Base):
     __tablename__ = "model_configs"
     __table_args__ = (
         Index(
-            "uq_model_configs_global", "scope", unique=True, sqlite_where=text("guild_id IS NULL")
+            "uq_model_configs_global",
+            "scope",
+            unique=True,
+            sqlite_where=text("guild_id IS NULL"),
+            postgresql_where=text("guild_id IS NULL"),
         ),
         Index(
             "uq_model_configs_guild",
@@ -251,6 +279,7 @@ class ModelConfigRecord(Base):
             "guild_id",
             unique=True,
             sqlite_where=text("guild_id IS NOT NULL"),
+            postgresql_where=text("guild_id IS NOT NULL"),
         ),
     )
 

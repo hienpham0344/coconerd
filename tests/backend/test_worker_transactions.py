@@ -133,7 +133,7 @@ async def test_completion_failure_rolls_back_staged_classification(monkeypatch):
         ),
         summaries=SimpleNamespace(latest=none, add=stage_summary),
         actions=SimpleNamespace(add=stage_action),
-        jobs=SimpleNamespace(complete=fail_completion),
+        jobs=SimpleNamespace(complete=fail_completion, wake_deferred=none),
         commit=processing_commit,
     )
 

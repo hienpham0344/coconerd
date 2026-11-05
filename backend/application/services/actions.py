@@ -43,6 +43,8 @@ async def complete_action(
     discord_message_id: str | None,
     *,
     lease_token: str | None = None,
+    previous_discord_thread_id: str | None = None,
+    discord_channel_id: str | None = None,
 ) -> ActionResult:
     action = await _get_action(uow, action_id)
     if action.status == "SUCCEEDED":
@@ -55,11 +57,23 @@ async def complete_action(
     _require_lease(action, worker_id, lease_token)
     if action.action_type == "CREATE_THREAD" and not discord_thread_id:
         raise InvalidTransition("CREATE_THREAD completion requires discord_thread_id")
+    relocate = discord_channel_id is not None
+    if relocate and not discord_thread_id:
+        raise InvalidTransition("Thread relocation requires discord_thread_id")
     if discord_thread_id:
         topic = await uow.topics.get(action.guild_id, action.topic_id)
         if topic is None or topic.guild_id != action.guild_id:
             raise Conflict("Action topic is inconsistent")
-        if (
+        if relocate:
+            settings = await uow.guilds.get_settings(action.guild_id)
+            if (
+                settings is None
+                or not settings.output_channel_id
+                or settings.output_channel_id != discord_channel_id
+                or topic.discord_thread_id != previous_discord_thread_id
+            ):
+                raise Conflict("Thread relocation does not match current mapping or Output Channel")
+        elif (
             action.action_type == "CREATE_THREAD"
             and topic.discord_thread_id
             and topic.discord_thread_id != discord_thread_id
@@ -78,7 +92,12 @@ async def complete_action(
     )
     if not changed:
         raise Conflict("Action lease was lost")
-    if action.action_type == "CREATE_THREAD":
+    if relocate:
+        if not await uow.topics.replace_thread(
+            action.guild_id, action.topic_id, previous_discord_thread_id, discord_thread_id
+        ):
+            raise Conflict("Topic thread mapping changed concurrently")
+    elif action.action_type == "CREATE_THREAD":
         await uow.topics.set_thread(action.guild_id, action.topic_id, discord_thread_id)
     await uow.commit()
     return ActionResult(action.id, "SUCCEEDED")

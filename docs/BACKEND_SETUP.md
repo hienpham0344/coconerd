@@ -2,6 +2,10 @@
 
 Hướng dẫn cho Linux/Bash, chạy tại thư mục gốc repository chứa `pyproject.toml` và `alembic.ini`. API và worker là hai tiến trình riêng. Bot Discord là ứng dụng thứ ba, kết nối qua HTTP.
 
+Runtime dùng [Railway PostgreSQL](RAILWAY_POSTGRES.md) với
+`COCONERD_REQUIRE_POSTGRES=true`. Các đoạn SQLite bên dưới chỉ dành cho kiểm thử
+hoặc dữ liệu local cũ; không dùng để khởi động runtime hiện tại.
+
 ## 1. Tạo môi trường Python
 
 Kiểm tra `python3.12 --version` (hoặc Python mới hơn, tối thiểu 3.12), `git --version` và `curl --version`. Nếu lệnh Python trên máy có tên khác, dùng tên đó để tạo venv.

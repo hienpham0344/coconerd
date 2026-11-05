@@ -1,13 +1,19 @@
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import AliasChoices, Field, SecretStr, field_validator
+from pydantic import AliasChoices, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from coconerd_ai.task_routing import TaskRouter, validate_meta_endpoint
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env", env_file_encoding="utf-8", extra="ignore", populate_by_name=True
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+        populate_by_name=True,
+        hide_input_in_errors=True,
     )
 
     app_env: str = Field(
@@ -21,6 +27,7 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("COCONERD_DATABASE_URL", "DATABASE_URL"),
     )
     checkpoint_db_path: str = "./data/checkpoints.db"
+    require_postgres: bool = Field(default=False, validation_alias="COCONERD_REQUIRE_POSTGRES")
     bot_api_key: SecretStr | None = Field(
         default=None, validation_alias=AliasChoices("COCONERD_BOT_API_KEY", "BOT_API_KEY")
     )
@@ -53,6 +60,10 @@ class Settings(BaseSettings):
         default="low",
         validation_alias=AliasChoices("COCONERD_LLM_REASONING_EFFORT", "LLM_REASONING_EFFORT"),
     )
+    agent_mode: Literal["task", "single"] = Field(
+        default="task", validation_alias="COCONERD_AGENT_MODE"
+    )
+    agent_task_profiles: str = Field(default="{}", validation_alias="COCONERD_TASK_PROFILES")
     worker_poll_seconds: float = Field(
         default=1.0,
         validation_alias=AliasChoices("COCONERD_WORKER_POLL_SECONDS", "WORKER_POLL_SECONDS"),
@@ -96,12 +107,34 @@ class Settings(BaseSettings):
 
     @field_validator("database_url")
     @classmethod
-    def require_async_sqlite(cls, value: str) -> str:
+    def require_async_database(cls, value: str) -> str:
         if value.startswith("sqlite:///"):
             return value.replace("sqlite:///", "sqlite+aiosqlite:///", 1)
-        if not value.startswith("sqlite+aiosqlite:"):
-            raise ValueError("DATABASE_URL must use the sqlite+aiosqlite driver")
+        for prefix in ("postgres://", "postgresql://"):
+            if value.startswith(prefix):
+                return "postgresql+asyncpg://" + value[len(prefix) :]
+        if not value.startswith(("sqlite+aiosqlite:", "postgresql+asyncpg://")):
+            raise ValueError("DATABASE_URL must use SQLite/aiosqlite or PostgreSQL/asyncpg")
         return value
+
+    @model_validator(mode="after")
+    def enforce_runtime_database(self) -> "Settings":
+        if self.require_postgres and not self.database_url.startswith("postgresql+asyncpg://"):
+            raise ValueError("PostgreSQL is required; configure COCONERD_DATABASE_URL")
+        return self
+
+    @model_validator(mode="after")
+    def validate_task_configuration(self) -> "Settings":
+        validate_meta_endpoint(self.meta_api_base)
+        TaskRouter(
+            model=self.meta_model_name,
+            temperature=self.llm_temperature,
+            max_tokens=self.llm_max_tokens,
+            reasoning_effort=self.llm_reasoning_effort,
+            mode=self.agent_mode,
+            profiles_json=self.agent_task_profiles,
+        )
+        return self
 
 
 @lru_cache

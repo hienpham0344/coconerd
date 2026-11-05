@@ -1,6 +1,6 @@
 """Plain application-facing data returned by persistence ports."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 
 
@@ -15,6 +15,7 @@ class MessageReadModel:
     content: str
     created_at: datetime
     reply_to_message_id: str | None
+    attachments: list[dict[str, object]] = field(default_factory=list)
 
 
 @dataclass(frozen=True, slots=True)

@@ -15,6 +15,11 @@ from backend.application.services.retention import prune_retained_data
 from backend.application.services.topics import mark_dormant_topics
 from backend.config import Settings, get_settings
 from backend.infrastructure.database.connection import create_session_factory
+from backend.infrastructure.database.notifications import (
+    JOBS_CHANNEL,
+    WakeupSignal,
+    listen_for_notifications,
+)
 from backend.infrastructure.database.unit_of_work import SqlAlchemyUnitOfWork
 from backend.infrastructure.meta_provider import (
     MetaModelProvider,
@@ -22,6 +27,7 @@ from backend.infrastructure.meta_provider import (
     MockMetaProvider,
 )
 from backend.logging_config import configure_logging
+from coconerd_ai.task_routing import TaskAlreadyRunError, TaskConfigurationError, TaskInputError
 
 logger = logging.getLogger(__name__)
 
@@ -36,9 +42,11 @@ class ConversationWorker:
         self.session_factory = create_session_factory(self.settings)
         self.worker_id = _worker_id()
         self._stop = asyncio.Event()
+        self._job_signal = WakeupSignal()
 
     async def stop(self) -> None:
         self._stop.set()
+        self._job_signal.notify()
 
     async def _heartbeat(self, status: str) -> None:
         async with self.session_factory() as session:
@@ -80,7 +88,7 @@ class ConversationWorker:
                 await complete_job(unit_of_work, job_id, result, owner=self.worker_id)
             await self._heartbeat("idle")
         except Exception as exc:
-            logger.exception(
+            logger.error(
                 "Message processing failed",
                 extra={
                     "guild_id": guild_id,
@@ -91,7 +99,16 @@ class ConversationWorker:
             await self._fail_job(
                 job_id,
                 type(exc).__name__,
-                retryable=not isinstance(exc, (MetaOutputTruncatedError, ModelCallBudgetExceeded)),
+                retryable=not isinstance(
+                    exc,
+                    (
+                        MetaOutputTruncatedError,
+                        ModelCallBudgetExceeded,
+                        TaskConfigurationError,
+                        TaskInputError,
+                        TaskAlreadyRunError,
+                    ),
+                ),
             )
         finally:
             if provider is not None:
@@ -126,10 +143,26 @@ class ConversationWorker:
             )
 
     async def run(self) -> None:
+        async with self._job_signal.subscribe() as wakeup:
+            listener = asyncio.create_task(
+                listen_for_notifications(
+                    self.session_factory.kw["bind"], JOBS_CHANNEL, self._job_signal
+                )
+            )
+            try:
+                await self._run(wakeup)
+            finally:
+                listener.cancel()
+                with suppress(asyncio.CancelledError):
+                    await listener
+                await self.session_factory.kw["bind"].dispose()
+
+    async def _run(self, wakeup: asyncio.Event) -> None:
         await self._heartbeat("running")
         next_retention_run = datetime.now(UTC)
         try:
             while not self._stop.is_set():
+                wakeup.clear()
                 if datetime.now(UTC) >= next_retention_run:
                     removed = await self.prune_retained_data()
                     dormant = await self.mark_dormant_topics()
@@ -144,15 +177,14 @@ class ConversationWorker:
                         )
                     next_retention_run = datetime.now(UTC) + timedelta(minutes=15)
                 found = await self.process_once()
-                if not found:
+                if not found and not self._stop.is_set():
                     await self._heartbeat("idle")
                     with suppress(TimeoutError):
                         await asyncio.wait_for(
-                            self._stop.wait(), timeout=self.settings.worker_poll_seconds
+                            wakeup.wait(), timeout=self.settings.worker_poll_seconds
                         )
         finally:
             await self._heartbeat("stopped")
-            await self.session_factory.kw["bind"].dispose()
 
 
 async def run_worker() -> None:

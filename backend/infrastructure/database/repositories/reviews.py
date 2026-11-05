@@ -4,7 +4,6 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 from sqlalchemy import or_, select, update
-from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import IntegrityError
 
 from backend.application.errors import Conflict
@@ -18,6 +17,7 @@ from backend.infrastructure.database.models import (
 )
 from backend.infrastructure.database.repositories import review_queries
 from backend.infrastructure.database.repositories.action_recovery import recover_action
+from backend.infrastructure.database.statements import conflict_insert
 
 
 class ReviewRepository:
@@ -108,7 +108,7 @@ class ReviewRepository:
         )
         if expected_revision == 0:
             statement = (
-                sqlite_insert(MessageTopicAssociationRecord)
+                conflict_insert(self.session, MessageTopicAssociationRecord)
                 .values(
                     id=str(uuid4()),
                     guild_id=guild_id,

@@ -132,6 +132,36 @@ async def test_noop_memory_emits_no_extra_summary_version_or_summary_action(data
         assert [a.action_type for a in actions].count("APPEND_MESSAGE") == 1
 
 
+async def test_chatter_does_not_create_conversation_or_discord_actions(database_factory):
+    from backend.infrastructure.database.models import DiscordActionRecord
+
+    class ChatterProvider(ProjectionProvider):
+        async def classify(self, *args):
+            result = await super().classify(*args)
+            result.decision.is_noteworthy = False
+            return result
+
+    async with database_factory() as session:
+        uow = SqlAlchemyUnitOfWork(session)
+        result = await _process(uow, "first", ChatterProvider("noop"))
+        assert result.outcome == "irrelevant"
+        assert list(await session.scalars(select(TopicRecord))) == []
+        assert list(await session.scalars(select(TopicSummaryRecord))) == []
+        assert list(await session.scalars(select(DiscordActionRecord))) == []
+
+
+async def test_initial_conversation_action_already_contains_its_note(database_factory):
+    from backend.infrastructure.database.models import DiscordActionRecord
+
+    async with database_factory() as session:
+        uow = SqlAlchemyUnitOfWork(session)
+        await _process(uow, "first", ProjectionProvider("noop"))
+        create = await session.scalar(
+            select(DiscordActionRecord).where(DiscordActionRecord.action_type == "CREATE_THREAD")
+        )
+        assert create.payload["summary"]["overview"] == "Atlas launch Friday"
+
+
 async def test_truncated_memory_reference_cannot_mutate_full_stored_memory(database_factory):
     from backend.infrastructure.database.models import DiscordActionRecord
 

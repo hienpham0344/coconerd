@@ -11,6 +11,22 @@ from backend.presentation.api.dependencies import ApiDependencies
 def create_router(dependencies: ApiDependencies) -> APIRouter:
     router = APIRouter()
 
+    @router.get("/api/v1/threads/{thread_id}/topic", tags=["topics"], dependencies=dependencies.bot)
+    async def get_thread_topic(
+        thread_id: str,
+        guild_id: str = Query(min_length=1, max_length=100),
+        uow: UnitOfWork = Depends(dependencies.get_uow),
+    ) -> dict[str, Any]:
+        topic = await topics.get_thread_topic(uow, guild_id, thread_id)
+        return {
+            "topic_id": topic.id,
+            "guild_id": topic.guild_id,
+            "channel_id": topic.channel_id,
+            "title": topic.title,
+            "status": topic.status,
+            "discord_thread_id": topic.discord_thread_id,
+        }
+
     @router.get("/api/v1/topics", tags=["topics"], dependencies=dependencies.bot)
     async def list_topics(
         guild_id: str = Query(min_length=1, max_length=100),
@@ -80,6 +96,7 @@ def create_router(dependencies: ApiDependencies) -> APIRouter:
                     "content": message.content,
                     "created_at": message.created_at,
                     "reply_to_message_id": message.reply_to_message_id,
+                    "attachments": message.attachments,
                 }
                 for message in messages
             ],

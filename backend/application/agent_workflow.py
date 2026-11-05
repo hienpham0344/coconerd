@@ -34,7 +34,9 @@ def create_topic_workflow(provider: ModelProvider):
         }
 
     async def classify(state: WorkflowState) -> dict[str, object]:
-        classification = classify_locally(state["message"], state["context"])
+        classification = classify_locally(
+            state["message"], state["context"], state["retrieved_candidates"]
+        )
         if classification is None:
             classification = await provider.classify(
                 state["message"], state["retrieved_candidates"], state["context"]

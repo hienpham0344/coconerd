@@ -19,9 +19,11 @@ def bound_context(items: list[ContextMessage]) -> list[ContextMessage]:
 
     priorities = {
         "followup_clarification": 0,
+        "conversation_followup": 0,
         "reply_ancestor": 1,
-        "topic_evidence": 2,
-        "recent": 3,
+        "conversation_predecessor": 2,
+        "topic_evidence": 3,
+        "recent": 4,
     }
     selected = {}
     remaining = MAX_CONTEXT_CHARS
@@ -54,6 +56,8 @@ async def build_message_context(
             return
         seen.add(record.discord_message_id)
         content = record.content[: min(MAX_MESSAGE_CHARS, remaining_chars)]
+        if not content and record.attachments:
+            content = "[Tệp đính kèm; nội dung chưa được phân tích]"[:remaining_chars]
         if not content:
             return
         chosen.append(
@@ -94,6 +98,10 @@ async def build_message_context(
         limit=MAX_CONTEXT_MESSAGES * 2,
         after=_utc(target.created_at) - timedelta(minutes=RECENT_MINUTES),
     )
+    if not target.reply_to_message_id:
+        nearest = next((item for item in recent if item.content.strip()), None)
+        if nearest:
+            include(nearest, "recent")
     target_terms = set(search_terms(target.content))
     ranked_recent = sorted(
         recent,

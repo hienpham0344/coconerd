@@ -67,6 +67,7 @@ def _decision_json() -> str:
             "evidence_message_ids": ["message-1"],
             "defer_reason": None,
             "multiple_topics": False,
+            "is_noteworthy": True,
         }
     )
 
@@ -113,7 +114,11 @@ async def test_meta_provider_requests_strict_topic_decision_schema_and_usage(
 ):
     completions = FakeCompletions(
         SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(content=_decision_json()))],
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(content=_decision_json()), finish_reason="stop"
+                )
+            ],
             usage=SimpleNamespace(
                 prompt_tokens=29,
                 completion_tokens=12,
@@ -170,8 +175,9 @@ async def test_meta_provider_requests_strict_topic_decision_schema_and_usage(
     assert result.reasoning_tokens == 5
     assert result.decision.evidence_message_ids == ["message-1"]
     assert schema["properties"]["multiple_topics"] == {"type": "boolean"}
+    assert schema["properties"]["is_noteworthy"] == {"type": "boolean"}
     assert result.latency_ms >= 0
-    assert completions.request["prompt_cache_key"] == _PROMPT_CACHE_KEY
+    assert completions.request["prompt_cache_key"] == f"{_PROMPT_CACHE_KEY}:topic_classification"
     assert completions.request["reasoning_effort"] == "low"
     assert completions.request["messages"][0]["role"] == "system"
     assert completions.request["messages"][1]["role"] == "user"

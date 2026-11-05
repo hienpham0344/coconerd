@@ -25,6 +25,7 @@ def _classification_payload(
         "candidate_topic_ids": result.candidate_topic_ids,
         "context_message_ids": context_message_ids or [],
         "language_hints": result.language_hints,
+        "task_route": result.task_route,
         "usage": {
             "prompt_tokens": result.prompt_tokens,
             "completion_tokens": result.completion_tokens,
@@ -67,6 +68,7 @@ async def process_message_record(
         content=record.content,
         created_at=record.created_at,
         reply_to_message_id=record.reply_to_message_id,
+        attachments=record.attachments,
     )
     tools_context = await TopicTools(uow).gather(message, followup_message_id)
     candidates = tools_context.candidates
@@ -162,6 +164,7 @@ async def process_message_record(
 
     if topic is not None:
         await project_topic(uow, message, topic, new_topic, prior_summary, summary_data)
+        await uow.jobs.wake_deferred(message.id)
     return ProcessingResult(
         decision.outcome,
         topic.id if topic else None,

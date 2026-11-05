@@ -38,6 +38,7 @@ def create_router(dependencies: ApiDependencies) -> APIRouter:
             content=body.content,
             created_at=body.created_at,
             reply_to_message_id=body.reply_to_message_id,
+            attachments=[item.model_dump(mode="json") for item in body.attachments],
         )
         try:
             await ingest_message(

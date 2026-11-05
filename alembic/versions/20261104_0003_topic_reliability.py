@@ -42,7 +42,9 @@ def _backfill_aliases():
         )
     ).mappings()
     for row in rows:
-        memory = json.loads(row["summary"]) if row["summary"] else {}
+        memory = row["summary"] or {}
+        if isinstance(memory, str):
+            memory = json.loads(memory)
         texts = [
             (row["title"], 3.0),
             (row["description"], 1.5),
@@ -65,7 +67,10 @@ def _backfill_aliases():
                 sa.text(
                     "INSERT INTO topic_search_terms(topic_id,guild_id,term,weight) "
                     "VALUES (:topic_id,:guild_id,:term,:weight) "
-                    "ON CONFLICT(topic_id,term) DO UPDATE SET weight=max(weight,excluded.weight)"
+                    "ON CONFLICT(topic_id,term) DO UPDATE SET weight=CASE "
+                    "WHEN topic_search_terms.weight > excluded.weight "
+                    "THEN topic_search_terms.weight "
+                    "ELSE excluded.weight END"
                 ),
                 [
                     dict(topic_id=row["id"], guild_id=row["guild_id"], term=term, weight=weight)

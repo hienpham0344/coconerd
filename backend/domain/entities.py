@@ -24,6 +24,7 @@ class ConversationMessage:
     created_at: datetime
     reply_to_message_id: str | None = None
     id: str = field(default_factory=lambda: str(uuid4()))
+    attachments: list[dict[str, object]] = field(default_factory=list)
 
 
 @dataclass(slots=True)

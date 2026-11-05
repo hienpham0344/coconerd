@@ -27,6 +27,8 @@ class MemoryReplacement(BaseModel):
 
 
 class TopicDecision(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     outcome: Literal["new", "existing", "defer", "irrelevant"]
     topic_id: str | None = None
     title: str | None = None
@@ -52,6 +54,7 @@ class TopicDecision(BaseModel):
         | None
     ) = None
     multiple_topics: bool = False
+    is_noteworthy: bool = True
 
 
 class ClassificationResult(BaseModel):
@@ -63,9 +66,10 @@ class ClassificationResult(BaseModel):
     cached_tokens: int | None = None
     reasoning_tokens: int | None = None
     latency_ms: int
-    policy_version: str = "topic-policy-v4"
+    policy_version: str = "topic-policy-v6"
     model_calls: int = 1
     language_hints: dict[str, object] = Field(default_factory=dict)
+    task_route: dict[str, object] = Field(default_factory=dict)
 
 
 class ModelProvider(Protocol):

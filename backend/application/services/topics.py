@@ -24,6 +24,13 @@ async def list_topics(
     return await uow.topics.list_for_channel(guild_id, channel_id, include_closed, limit)
 
 
+async def get_thread_topic(uow: UnitOfWork, guild_id: str, thread_id: str) -> TopicReadModel:
+    topic = await uow.topics.get_by_thread(guild_id, thread_id)
+    if topic is None:
+        raise NotFound("Topic not found for this thread")
+    return topic
+
+
 async def get_topic_messages(
     uow: UnitOfWork, guild_id: str, topic_id: str, limit: int, before: str | None
 ) -> Sequence[MessageReadModel]:

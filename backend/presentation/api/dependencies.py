@@ -4,6 +4,7 @@ from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from typing import Any
 
+from backend.application.ports.notifications import Notifications
 from backend.application.ports.persistence import UnitOfWork
 from backend.config import Settings
 
@@ -16,3 +17,5 @@ class ApiDependencies:
     admin: list[Any]
     bot_auth: Callable[..., Any]
     admin_auth: Callable[..., Any]
+    delivery: list[Any]
+    action_notifications: Notifications

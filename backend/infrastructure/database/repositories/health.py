@@ -3,10 +3,10 @@
 from datetime import datetime
 
 from sqlalchemy import select, text
-from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.infrastructure.database.models import WorkerHeartbeatRecord
+from backend.infrastructure.database.statements import conflict_insert
 
 
 class HealthRepository:
@@ -15,7 +15,7 @@ class HealthRepository:
 
     async def record_heartbeat(self, worker_id: str, status: str, seen_at: datetime) -> None:
         await self.session.execute(
-            sqlite_insert(WorkerHeartbeatRecord)
+            conflict_insert(self.session, WorkerHeartbeatRecord)
             .values(worker_id=worker_id, status=status, last_seen_at=seen_at)
             .on_conflict_do_update(
                 index_elements=["worker_id"], set_={"status": status, "last_seen_at": seen_at}

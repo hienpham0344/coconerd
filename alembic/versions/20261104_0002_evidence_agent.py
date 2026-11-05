@@ -55,7 +55,11 @@ def _terms(value):
     )
     aliases = {"db": "database", "csdl": "database", "auth": "authentication"}
     return list(
-        dict.fromkeys(aliases.get(term, term) for term in value.split() if term not in stop)
+        dict.fromkeys(
+            aliases.get(term, term)
+            for term in value.split()
+            if term not in stop and len(term) <= 300
+        )
     )[:300]
 
 
@@ -72,7 +76,10 @@ def upgrade():
     op.add_column(
         "processing_jobs", sa.Column("deferred_until", sa.DateTime(timezone=True), nullable=True)
     )
-    op.execute("UPDATE processing_jobs SET model_call_count = min(attempt_count, 2)")
+    op.execute(
+        "UPDATE processing_jobs SET model_call_count = "
+        "CASE WHEN attempt_count < 2 THEN attempt_count ELSE 2 END"
+    )
     op.create_table(
         "topic_search_terms",
         sa.Column(
@@ -96,7 +103,9 @@ def upgrade():
         )
     ).mappings()
     for row in rows:
-        summary = json.loads(row["summary"]) if row["summary"] else {}
+        summary = row["summary"] or {}
+        if isinstance(summary, str):
+            summary = json.loads(summary)
         texts = [
             (row["title"], 3.0),
             (row["description"], 1.5),

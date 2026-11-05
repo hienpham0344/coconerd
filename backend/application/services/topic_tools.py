@@ -1,8 +1,14 @@
 """Bounded read-only tools orchestrated by code, without a paid tool-calling loop."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from datetime import timedelta
 
-from backend.application.clarification import is_clarification
+from backend.application.clarification import (
+    CONVERSATION_FOLLOWUP_SECONDS,
+    is_clarification,
+    is_conversation_followup,
+    utc,
+)
 from backend.application.contracts import TopicCandidate
 from backend.application.ports.persistence import UnitOfWork
 from backend.application.read_models import ContextMessage, MessageReadModel
@@ -29,7 +35,13 @@ class TopicTools:
         anchors = " ".join(
             item.content
             for item in context
-            if item.relation in {"reply_ancestor", "followup_clarification"}
+            if item.relation
+            in {
+                "reply_ancestor",
+                "followup_clarification",
+                "conversation_followup",
+                "conversation_predecessor",
+            }
         )
         query = f"{message.content} {anchors}"[:2400]
         indexed = await self.uow.topics.search(message.guild_id, query, limit=30)
@@ -58,6 +70,28 @@ class TopicTools:
         self, message: ConversationMessage, followup_message_id: str | None = None
     ) -> TopicContext:
         context = await self.get_reply_chain(message)
+        predecessor_topic = None
+        if not message.reply_to_message_id:
+            for prior in reversed(context):
+                if prior.relation != "recent" or not (
+                    utc(message.created_at) - timedelta(seconds=CONVERSATION_FOLLOWUP_SECONDS)
+                    <= utc(prior.created_at)
+                    < utc(message.created_at)
+                ):
+                    continue
+                associated = await self.uow.messages.reply_topic_id(
+                    message.guild_id, prior.message_id
+                )
+                predecessor_topic = (
+                    await self.uow.topics.get(message.guild_id, associated) if associated else None
+                )
+                if predecessor_topic and predecessor_topic.status != "CLOSED":
+                    context = bound_context(
+                        [replace(prior, relation="conversation_predecessor"), *context]
+                    )
+                    break
+                predecessor_topic = None
+        followup_topic = None
         if followup_message_id:
             followup = await self.uow.messages.get(followup_message_id)
             target = MessageReadModel(
@@ -71,7 +105,21 @@ class TopicTools:
                 message.created_at,
                 message.reply_to_message_id,
             )
+            relation = None
             if followup and is_clarification(target, followup):
+                relation = "followup_clarification"
+            elif followup and is_conversation_followup(target, followup):
+                associated = await self.uow.messages.reply_topic_id(
+                    message.guild_id, followup.discord_message_id
+                )
+                followup_topic = (
+                    await self.uow.topics.get(message.guild_id, associated) if associated else None
+                )
+                if followup_topic and followup_topic.status != "CLOSED":
+                    relation = "conversation_followup"
+                else:
+                    followup_topic = None
+            if relation:
                 context = bound_context(
                     [
                         ContextMessage(
@@ -79,13 +127,20 @@ class TopicTools:
                             followup.author_id,
                             followup.author_name,
                             followup.created_at,
-                            "followup_clarification",
+                            relation,
                             followup.content,
                         ),
                         *context,
                     ]
                 )
         records = await self.search_topics(message, context)
+        if predecessor_topic:
+            records = [
+                predecessor_topic,
+                *(item for item in records if item.id != predecessor_topic.id),
+            ]
+        if followup_topic:
+            records = [followup_topic, *(item for item in records if item.id != followup_topic.id)]
         reply_topic_id = None
         if message.reply_to_message_id and any(
             item.message_id == message.reply_to_message_id and item.relation == "reply_ancestor"
@@ -116,7 +171,15 @@ class TopicTools:
                     description=topic.description,
                     status=topic.status,
                     summary=summary.data if summary else {},
-                    evidence="direct_reply_target" if topic.id == reply_topic_id else "",
+                    evidence=(
+                        "direct_reply_target"
+                        if topic.id == reply_topic_id
+                        else "conversation_followup_target"
+                        if followup_topic and topic.id == followup_topic.id
+                        else "conversation_predecessor_target"
+                        if predecessor_topic and topic.id == predecessor_topic.id
+                        else ""
+                    ),
                 )
             )
         candidates = retrieve_topic_candidates(retrieval_message(message, context), candidates)

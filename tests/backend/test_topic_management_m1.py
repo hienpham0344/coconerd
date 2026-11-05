@@ -5,7 +5,7 @@ Verifies:
 2. Backend GET /api/v1/topics/{topic_id}/summary channel isolation invariant.
 3. Ingestion pipeline protection: messages in discord.Thread are ignored.
 4. Slash command /summarize:
-   - Rejected when invoked from a Thread.
+   - Unmanaged Threads cannot publish a summary.
    - Rejected when invoked from the Output Channel.
    - Rejected when invoked from an unconfigured channel.
    - topic_id: 0 lists topics with 1-based sequential indices.
@@ -326,7 +326,7 @@ def mock_bot_with_settings():
 
 
 @pytest.mark.asyncio
-async def test_summarize_rejects_inside_thread(mock_bot_with_settings):
+async def test_summarize_rejects_thread_outside_configured_output(mock_bot_with_settings):
     bot = mock_bot_with_settings
     cmd = bot.tree.get_command("summarize")
     assert cmd is not None
@@ -334,14 +334,17 @@ async def test_summarize_rejects_inside_thread(mock_bot_with_settings):
     interaction = MagicMock(spec=discord.Interaction)
     interaction.guild = MagicMock(spec=discord.Guild, id=100)
     interaction.channel = MagicMock(spec=discord.Thread)
+    interaction.channel.parent_id = 12345
+    interaction.channel_id = 45678
     interaction.response = MagicMock()
-    interaction.response.send_message = AsyncMock()
+    interaction.response.defer = AsyncMock()
+    interaction.followup.send = AsyncMock()
 
     await cmd.callback(interaction, topic_id=0)
 
-    interaction.response.send_message.assert_called_once()
-    args, kwargs = interaction.response.send_message.call_args
-    assert "thread" in args[0].lower()
+    interaction.followup.send.assert_awaited_once()
+    args, kwargs = interaction.followup.send.call_args
+    assert "Output Channel" in args[0]
     assert kwargs.get("ephemeral") is True
 
 

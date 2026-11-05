@@ -10,6 +10,7 @@ class JsonFormatter(logging.Formatter):
         "message_id",
         "topic_id",
         "agent_name",
+        "task_route",
         "model_id",
         "latency_ms",
         "status",

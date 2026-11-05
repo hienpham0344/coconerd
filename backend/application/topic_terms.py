@@ -70,7 +70,9 @@ def search_terms(value: str, limit: int = 24) -> list[str]:
     normalized = _PHRASE_PATTERN.sub(lambda match: _PHRASE_ALIASES[match[0]], normalized)
     return list(
         dict.fromkeys(
-            _ALIASES.get(term, term) for term in normalized.split() if term not in _STOPWORDS
+            _ALIASES.get(term, term)
+            for term in normalized.split()
+            if term not in _STOPWORDS and len(term) <= 300
         )
     )[:limit]
 

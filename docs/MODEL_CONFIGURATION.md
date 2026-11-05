@@ -6,7 +6,12 @@ Use one local `.env` at the root of the checkout you run. `Settings` resolves `.
 
 Topic classification uses Meta JSON-Schema structured output and `topic-policy-v4` reference validation. The local index searches old eligible topics, combines at most 30 matches with 30 recent topics, and ranks at most five compact cards. This adds no model provider or paid subagent. Blank text becomes local `irrelevant`; acknowledgements without an explicit anchor can become local `defer`, both with zero tokens. Assignments below confidence 0.7 abstain; this is not calibrated accuracy. Structured memory replacements require a known previous fact and a verbatim target quote. Other passes use one Meta call. A message can have at most one evidence-triggered reassessment and two durable call reservations across retries.
 
-The request keeps a stable prompt prefix and versioned cache key (`coconerd-topic-classification-v4-memory-v1`) so Meta can apply prompt-prefix caching. Counts are recorded only when returned; cache hits or lower cost are not guaranteed. There is no cross-message decision cache. Context is capped at six messages/1,600 characters and five topic cards. The original target text keeps the configured ingestion length limit.
+The request keeps a stable prompt prefix and a versioned base cache key defined in
+`meta_provider.py`, followed by `:topic_classification` or `:topic_memory`, so Meta
+can distinguish task prompts when applying prompt-prefix caching. Counts are recorded
+only when returned; cache hits or lower cost are not guaranteed. There is no
+cross-message decision cache. Context is capped at six messages/1,600 characters and
+five topic cards. The original target text keeps the configured ingestion length limit.
 
 `COCONERD_LLM_REASONING_EFFORT` defaults to `low` and accepts `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`. `COCONERD_LLM_MAX_TOKENS` defaults to `2048`; `LLM_MAX_TOKENS` remains an alias. Reasoning tokens count toward the output limit and are stored when Meta reports them. A response ending with `finish_reason=length` is recorded as a distinct truncation failure, not a valid topic decision. Check measured output usage before changing the limit or effort: lower effort does not by itself prove lower cost or equal accuracy.
 
@@ -15,6 +20,14 @@ Configuration precedence:
 1. Enabled guild model configuration written by an administrator.
 2. Global model configuration written by an administrator.
 3. `COCONERD_META_MODEL_NAME`, `LLM_TEMPERATURE`, and `COCONERD_LLM_MAX_TOKENS`.
+
+These resolve the worker's base settings. `COCONERD_AGENT_MODE=task` then applies
+the selected task override from `COCONERD_TASK_PROFILES`. Overrides are explicit
+operator configuration, including any task model ID; they do not discover models.
+The bot selects `chat`; the worker selects `topic_memory` only when retrieved cards
+contain stored facts, otherwise `topic_classification`. Memory and classification
+remain one paid call. `single` uses base parameters but retains safety checks.
+See [task orchestration](TASK_ORCHESTRATION.md) for limits, JSON configuration and traces.
 
 Bot callers cannot change a model. The admin API accepts provider `meta`, model ID, temperature, and max tokens. Reasoning effort is set globally through the environment and is not overridden by the admin API. Unsupported providers fail explicitly.
 

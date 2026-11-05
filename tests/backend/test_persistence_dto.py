@@ -23,6 +23,11 @@ class ScalarRows(list):
 
 
 class SessionSpy:
+    def get_bind(self):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(dialect=SimpleNamespace(name="sqlite"))
+
     def __init__(self, *, scalar_values=(), scalar_rows=(), get_result=None, rowcounts=()):
         self.scalar_values = iter(scalar_values)
         self.scalar_rows = iter(scalar_rows)

@@ -18,9 +18,12 @@ _ELIGIBLE_STATUSES = {"ACTIVE", "DORMANT", "RESUMED"}
 def retrieval_message(
     message: ConversationMessage, context: Sequence[ContextMessage]
 ) -> ConversationMessage:
-    """Use an explicit clarification for ranking only; retain the original model target."""
+    """Use linked conversation turns for ranking; retain the original model target."""
     clarification = " ".join(
-        item.content for item in context if item.relation == "followup_clarification"
+        item.content
+        for item in context
+        if item.relation
+        in {"followup_clarification", "conversation_followup", "conversation_predecessor"}
     )
     return (
         replace(message, content=f"{message.content} {clarification}") if clarification else message
@@ -102,12 +105,27 @@ def retrieve_topic_candidates(
     )
     zero_overlap = not message_tokens or _score(message_tokens, ranked[0]) == 0.0
     selected = [direct_reply] if direct_reply is not None else []
+    selected.extend(
+        candidate
+        for candidate in bounded
+        if candidate.evidence == "conversation_followup_target" and candidate not in selected
+    )
+    selected.extend(
+        candidate
+        for candidate in bounded
+        if candidate.evidence == "conversation_predecessor_target" and candidate not in selected
+    )
     selected.extend(candidate for candidate in ranked if candidate not in selected)
     shortlist = selected[:limit]
     if zero_overlap:
         shortlist = [
             candidate.model_copy(update={"evidence": "local_zero_overlap_fallback"})
-            if candidate.evidence != "direct_reply_target"
+            if candidate.evidence
+            not in {
+                "direct_reply_target",
+                "conversation_followup_target",
+                "conversation_predecessor_target",
+            }
             else candidate
             for candidate in shortlist
         ]

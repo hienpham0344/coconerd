@@ -4,11 +4,41 @@ Repo có sẵn consumer trong `bot/`: chạy `python -m pip install -r bot/requi
 sau đó `python -m bot.main`. `/setup` cấu hình channel trực tiếp trong Discord;
 `/summarize topic_id:0` liệt kê topic trong Input Channel. Consumer claim từng action,
 gửi lại `lease_token` khi ACK và lưu mapping Thread bằng completion có lease.
+Bot đăng một tin tiêu đề trong Output Channel đã chọn, tạo public Thread gắn vào
+tin đó và chuyển nguyên văn tin thành viên vào Thread theo dạng `[tên]-tin nhắn`.
+Tin tiêu đề có ghi chú tự cập nhật từ summary: nội dung chính, đề xuất, điều đã chốt,
+việc cần làm và câu hỏi còn mở. Mỗi lần cập nhật sửa cùng tin đầu, không gửi thêm tin.
+Worker chỉ đưa nội dung đáng ghi nhớ vào topic; chuyện phiếm không tạo Thread hay action.
+Các câu hỏi thực tế về lịch học, họp hoặc ăn uống vẫn có thể tạo topic khi chưa chốt.
+Ghi chú dài ưu tiên thông tin mới nhất. Policy áp dụng khi worker xử lý message;
+không tự xóa hoặc phân loại lại conversation cũ.
+Thành viên gọi `/summarize` ngay trong Thread để đăng thêm
+tóm tắt tại đó; không cần nhập `topic_id`. Thread phải thuộc Output Channel đã
+setup và có mapping topic trong cùng guild. Trong Input Channel, cú pháp chọn/
+liệt kê topic bằng `topic_id` được giữ nguyên.
+Receipt Discord lưu qua backend API vào bảng `delivery_receipts` của PostgreSQL,
+chỉ chứa ID và khóa, không chứa nội dung tin. Bot không cần mật khẩu database.
+Receipt được giữ qua restart và thay máy chạy bot. Khi mapping còn trỏ Thread ở kênh cũ,
+action kế tiếp tạo Thread ở Output Channel hiện tại, sao chép lịch sử topic theo
+thứ tự thời gian rồi cập nhật mapping bằng ACK có lease. Tin/Thread cũ được giữ lại.
 Các kiểm thử tự động dùng Discord mocks; vẫn cần kiểm thử quyền và delivery trên guild pilot.
 
 Đối tượng: người viết bot bằng Discord SDK bất kỳ. Backend không giữ Discord token, không gọi Discord API và không cung cấp SDK client riêng. Trước tiên hoàn tất [setup backend/DB](BACKEND_SETUP.md); schema HTTP chuẩn nằm trong [API contract](API_CONTRACT.md) và `/openapi.json`.
 
 ## 1. Thông tin cần bàn giao
+
+Phản hồi khi tag bot và worker phân loại/tóm tắt đều dùng Meta Model API.
+Đặt `COCONERD_MODEL_API_KEY` trong `.env`; endpoint là `https://api.meta.ai/v1`,
+model mặc định `muse-spark-1.3`. Bot dùng cùng `COCONERD_META_MODEL_NAME`,
+`COCONERD_LLM_REASONING_EFFORT` (mặc định `low`) và `COCONERD_LLM_MAX_TOKENS`
+(mặc định 2048) với worker. Package `openai` là SDK truyền request tới Meta.
+`COCONERD_MOCK_LLM=true` chỉ dành cho worker offline; chat vẫn cần key Meta.
+Chat timeout sau 15 giây, không tự retry; khi lỗi dùng câu meme tĩnh có sẵn.
+Không có AI provider dự phòng. Restart bot và worker sau khi đổi cấu hình.
+
+`COCONERD_AGENT_MODE=task` chọn profile `chat` cho mention; cấu hình riêng qua
+`COCONERD_TASK_PROFILES`. Profile có thể giảm deadline hoặc đổi token/effort/model
+Meta mà không tác động task worker. Xem [điều phối task](TASK_ORCHESTRATION.md).
 
 | Thông tin | Nơi sử dụng |
 | --- | --- |
@@ -39,7 +69,11 @@ Admin bật đúng guild/channel qua `PUT /api/v1/admin/guilds/{guild_id}/settin
 - Gửi từng message gốc; không gộp nhiều người/chủ đề thành một `content`.
 - Giữ ID dưới dạng **string** xuyên suốt để tránh làm tròn số lớn khi dùng JavaScript.
 - `created_at` dùng thời gian message gốc có timezone; `reply_to_message_id` là ID message được reply hoặc `null`.
-- Nội dung hiện là text. Backend chưa có attachment/OCR/audio extraction và chưa có giao thức edit/delete.
+- Giữ nguyên `content` và URL thành viên gửi; `attachments` lưu metadata file Discord (ID, filename, URL, content_type, size, spoiler). Tin chỉ có ảnh/file vẫn được nhận dù `content` rỗng. Bot không mở link, OCR hoặc phân tích nội dung ảnh/audio bằng AI; chưa có giao thức edit/delete.
+
+Bot sao chép lại ảnh/file vào Thread qua Discord SDK, giữ tên và spoiler, với receipt riêng cho từng attachment để retry/backfill không gửi lại file đã ghi nhận. Chỉ tải attachment lấy từ message nguồn trong cùng guild; metadata URL không được dùng để tải tùy ý. File quá giới hạn dung lượng guild hoặc nguồn đã mất sẽ được giữ bằng tên/link kèm lý do rõ ràng. Bot cần quyền đọc lịch sử Input Channel và `Attach Files` tại Thread để tải lại file; thiếu quyền upload thì gửi link dự phòng. Link trong tin text được giữ nguyên, URL bình thường không bị cắt giữa hai phần tin.
+
+Tin chỉ có file reply vào message đã thuộc topic sẽ vào cùng topic; nếu không có điểm neo hợp lệ thì tạo topic đính kèm riêng với tên trung tính. Không suy diễn nội dung ảnh hoặc tạo fact từ ảnh. Khi cài bản này cho DB cũ, chạy `alembic upgrade head` (migration `20261105_0006`) trước khi restart API, worker và bot. Migration chỉ thêm cột JSON metadata; không sao chép dữ liệu ảnh vào DB.
 
 Mapping sự kiện Discord → JSON:
 
@@ -62,7 +96,9 @@ Mapping sự kiện Discord → JSON:
 
 ## 4. Claim, thực thi và ACK
 
-Bot cần hai luồng độc lập: nhận/gửi message và polling outbox. Trong pilot, có thể bắt đầu claim `limit=1`, poll mỗi 2 giây lúc rỗng và tăng backoff khi lỗi. Đây là giá trị gợi ý ở client; tính tổng ingest/claim/ACK theo tải để không vượt quota backend.
+Bot có hai luồng độc lập: nhận/gửi message và xử lý outbox. Consumer hiện mở WebSocket `/api/v1/actions/events` bằng header `X-API-Key`; nhận `{"type":"actions_available"}` thì claim ngay bằng HTTP với `limit=1`. Khi vẫn có action, bot xử lý tiếp ngay, không nghỉ giữa các action. Socket tự reconnect với backoff 1–30 giây; heartbeat ứng dụng mỗi 20 giây. Khi không có tín hiệu, bot vẫn poll dự phòng mỗi 2,5 giây để phục hồi retry/lease hết hạn hoặc tín hiệu bị lỡ. Tổng ingest/claim/ACK vẫn tính quota backend.
+
+PostgreSQL dùng `LISTEN/NOTIFY` để đánh thức worker khi job mới commit và báo API khi action mới commit. Mỗi worker/API process giữ một kết nối listener trong pool, tự kết nối lại và quét backlog. Tín hiệu không chứa nội dung chat; dữ liệu, lease và receipt vẫn lấy từ HTTP/DB. SQLite trong test chỉ dùng polling dự phòng. Không cần Redis, dependency mới hoặc migration mới cho socket. Để bật thay đổi trên runtime, restart cả API, worker và bot bằng các lệnh hiện có; reverse proxy phải cho phép WebSocket Upgrade tại `/api/v1/actions/events`. URL `https://` của backend tự chuyển thành `wss://`, dùng nguyên đường dẫn prefix nếu có.
 
 ```http
 POST /api/v1/actions/claim
@@ -108,14 +144,17 @@ claim → kiểm tra action_id trong kho kết quả bot
 
 | Type | Payload và hành động bot |
 | --- | --- |
-| `CREATE_THREAD` | Dùng `title`, xử lý bản sao nguồn từ `source_*` nếu có; tạo thread và lưu `topic_id → thread_id` |
-| `APPEND_MESSAGE` | Dùng `source_*`, gửi bản sao có tác giả và link nguồn vào thread của topic |
-| `UPSERT_SUMMARY` | Dùng `summary_id`, `version`, `summary`; tạo/sửa summary message do bot sở hữu, lưu message ID và version |
+| `CREATE_THREAD` | Đăng `title` kèm ghi chú từ `payload.summary` vào Output Channel, tạo Thread từ tin đầu, sao chép nguồn/lịch sử và lưu `topic_id → thread_id` |
+| `APPEND_MESSAGE` | Dùng `source_*`, gửi `[tên]-tin nhắn` vào Thread của topic |
+| `UPSERT_SUMMARY` | Sửa ghi chú trên tin đầu của Thread theo `payload.summary`; receipt theo phiên bản tránh sửa lại khi retry hoặc ghi đè bởi bản cũ |
 | `RENAME_THREAD` | Được enum cho phép nhưng luồng projection/recovery hiện chưa sinh type này; nếu gặp action chưa biết, báo lỗi để review thay vì ACK im lặng |
 
 Claim không có trường top-level `discord_thread_id`. Bot đọc mapping của mình hoặc gọi `GET /api/v1/topics/{topic_id}?guild_id=...` để lấy thread đã được ACK. `payload.summary` có `overview`, `proposals`, `decisions`, `open_questions`, `action_items`; không phải chuỗi message Discord đã định dạng.
 
-Bot chịu trách nhiệm chia nội dung theo giới hạn Discord, vô hiệu mention ngoài ý muốn, ghi tác giả và link `https://discord.com/channels/{guild_id}/{channel_id}/{source_message_id}`. Chỉ có source ID chưa chứng minh source còn tồn tại. Summary message ID chưa có endpoint riêng để lấy lại; bot cần lưu nó bền vững. Nếu một action tạo nhiều message, lưu toàn bộ receipt ở bot và thống nhất ID đại diện dùng cho ACK.
+Bot chia nội dung dài theo giới hạn Discord, giữ tên và nội dung gốc, vô hiệu mention
+ngoài ý muốn. Source ID là khóa receipt để tránh sao chép lại cùng tin; receipt lưu
+riêng từng phần khi một tin dài cần nhiều message. Ghi chú dùng ID tin đầu đã lưu
+trong receipt và phiên bản đã cập nhật. ACK tin nguồn dùng ID của phần đầu làm ID đại diện.
 
 Sau khi Discord thực hiện thành công, ACK bằng dữ liệu thực:
 
@@ -133,6 +172,11 @@ Content-Type: application/json
 ```
 
 Response: `{"action_id":"action-001","status":"SUCCEEDED"}`. `CREATE_THREAD` bắt buộc có `discord_thread_id`; message action nên gửi ID message Discord đã ghi. ACK lặp với cùng kết quả an toàn; kết quả khác trả `409`.
+
+Khi chuyển Thread sang Output Channel hoặc thay Thread đã bị xóa, completion thêm
+`previous_discord_thread_id` (nullable) và `discord_channel_id`. Backend chỉ thay
+mapping nếu mapping cũ còn khớp, destination đúng Output Channel hiện tại và lease
+còn hợp lệ; không khớp trả `409` và không hoàn tất action.
 
 ### Lease và thứ tự
 
@@ -182,8 +226,9 @@ Manual correction có thể đánh dấu action cũ superseded và pause sync; b
 - [ ] DB ở head; API/worker cùng DB; health body báo `ok`.
 - [ ] Backend bot key và Discord token khác nhau, không nằm trong client browser/log.
 - [ ] Guild/channel thật đã allowlist; intent, permission và phạm vi người xem thread phù hợp.
-- [ ] Gửi một message → nhận 202 → worker → CREATE_THREAD → complete → summary.
-- [ ] Reply cùng topic → APPEND_MESSAGE/summary; có mapping thread và summary message bền vững.
+- [ ] Gửi nội dung thực tế → nhận 202 → worker → CREATE_THREAD → complete; tin đầu có ghi chú, Thread có tin gốc.
+- [ ] Reply bổ sung thông tin → APPEND_MESSAGE và cập nhật ghi chú cùng tin đầu; `/summarize` vẫn hoạt động trong Thread.
+- [ ] Chuyện phiếm không tạo topic/action; đề xuất chưa chốt được ghi đúng trạng thái, không biến thành quyết định.
 - [ ] Gửi lại cùng message ID không tạo job/thread mới.
 - [ ] Output của bot không bị ingest lại.
 - [ ] Mô phỏng mất ACK và restart bot; khôi phục receipt, không tạo trùng side effect.

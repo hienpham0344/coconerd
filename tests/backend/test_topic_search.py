@@ -10,6 +10,15 @@ from backend.infrastructure.database.repositories.summaries import SummaryReposi
 from backend.infrastructure.database.repositories.topics import TopicRepository
 
 
+def test_search_terms_skip_oversized_tokens_without_losing_short_terms():
+    from backend.application.topic_terms import search_terms, weighted_topic_terms
+
+    content = "DB " + "x" * 301
+    assert "database" in search_terms(content)
+    assert all(len(term) <= 300 for term in search_terms(content))
+    assert all(len(term) <= 300 for term in weighted_topic_terms("Atlas", content, {}))
+
+
 async def test_latest_summaries_are_batched_and_guild_scoped(database_factory):
     from sqlalchemy import event
 

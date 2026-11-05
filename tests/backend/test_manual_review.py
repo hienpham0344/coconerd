@@ -368,7 +368,8 @@ async def test_guild_deletion_removes_review_audit_and_preserves_foreign_guild(
     )
     assert response.status_code == 200
     async with database_factory() as session:
-        await session.execute(text("PRAGMA foreign_keys=ON"))
+        if session.get_bind().dialect.name == "sqlite":
+            await session.execute(text("PRAGMA foreign_keys=ON"))
         assert len(list(await session.scalars(select(ReviewEventRecord)))) == 1
         await delete_guild_data(SqlAlchemyUnitOfWork(session), "g")
         assert list(await session.scalars(select(ReviewEventRecord))) == []

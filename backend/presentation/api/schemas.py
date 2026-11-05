@@ -1,7 +1,20 @@
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator, model_validator
+
+
+class DeliveryReceiptResponse(BaseModel):
+    discord_id: str = Field(min_length=1, max_length=100)
+
+
+class MessageAttachment(BaseModel):
+    id: str = Field(min_length=1, max_length=100)
+    filename: str = Field(min_length=1, max_length=1024)
+    url: HttpUrl = Field(max_length=4096)
+    content_type: str | None = Field(default=None, max_length=200)
+    size: int = Field(ge=0)
+    spoiler: bool = False
 
 
 class MessageIngestRequest(BaseModel):
@@ -13,6 +26,7 @@ class MessageIngestRequest(BaseModel):
     content: str = Field(max_length=8000)
     created_at: datetime
     reply_to_message_id: str | None = Field(default=None, max_length=100)
+    attachments: list[MessageAttachment] = Field(default_factory=list, max_length=10)
 
     @field_validator("created_at")
     @classmethod
@@ -37,6 +51,8 @@ class ActionCompletionRequest(BaseModel):
     worker_id: str = Field(min_length=1, max_length=100)
     discord_thread_id: str | None = Field(default=None, max_length=100)
     discord_message_id: str | None = Field(default=None, max_length=100)
+    previous_discord_thread_id: str | None = Field(default=None, max_length=100)
+    discord_channel_id: str | None = Field(default=None, max_length=100)
 
 
 class ActionFailureRequest(BaseModel):

@@ -73,6 +73,7 @@ async def test_ingest_rejects_channel_outside_admin_allowlist(api_client, databa
 async def test_claim_respects_thread_dependency_and_ack_is_idempotent(api_client, database_factory):
     async with database_factory() as session:
         session.add(TopicRecord(id="topic-1", guild_id="guild-1", title="Release", status="ACTIVE"))
+        await session.flush()
         session.add_all(
             [
                 DiscordActionRecord(

@@ -8,6 +8,7 @@ from sqlalchemy.orm import aliased
 from backend.application.read_models import ActionReadModel, ActionState, ClaimedAction
 from backend.domain.enums import ActionStatus, ActionType
 from backend.infrastructure.database.models import DiscordActionRecord, TopicRecord
+from backend.infrastructure.database.notifications import ACTIONS_CHANNEL, notify_transaction
 
 
 class ActionRepository:
@@ -65,6 +66,7 @@ class ActionRepository:
             max_attempts=max_attempts,
         )
         self.session.add(record)
+        await notify_transaction(self.session, ACTIONS_CHANNEL)
         return record
 
     async def claim_available(

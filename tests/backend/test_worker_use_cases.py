@@ -35,6 +35,9 @@ from backend.infrastructure.database.unit_of_work import SqlAlchemyUnitOfWork
 
 
 class SyncSessionAdapter:
+    def get_bind(self):
+        return self.session.get_bind()
+
     def __init__(self, session):
         self.session = session
 
@@ -44,8 +47,8 @@ class SyncSessionAdapter:
     async def scalars(self, statement):
         return self.session.scalars(statement)
 
-    async def execute(self, statement):
-        return self.session.execute(statement)
+    async def execute(self, statement, params=None):
+        return self.session.execute(statement, params)
 
     async def get(self, model, key):
         return self.session.get(model, key)
@@ -232,6 +235,7 @@ async def test_retention_removes_expired_messages_and_redacts_only_their_actions
                 payload={
                     "source_message_id": "discord-old",
                     "source_content": "secret",
+                    "source_attachments": [{"url": "https://cdn.discordapp.com/old.png"}],
                     "other": "keep",
                 },
             ),

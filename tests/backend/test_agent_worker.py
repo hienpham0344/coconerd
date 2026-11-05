@@ -1,5 +1,7 @@
+import logging
 from datetime import UTC, datetime, timedelta
 
+import pytest
 from sqlalchemy import func, select, update
 
 from backend.application.contracts import ClassificationResult, TopicDecision
@@ -17,6 +19,84 @@ from backend.infrastructure.database.models import (
 from backend.infrastructure.database.unit_of_work import SqlAlchemyUnitOfWork
 from backend.infrastructure.meta_provider import MetaTimeoutError
 from backend.worker import ConversationWorker
+from coconerd_ai.task_routing import TaskConfigurationError, TaskInputError
+
+
+async def test_worker_failure_log_does_not_include_provider_exception_body(
+    database_factory, caplog, monkeypatch
+):
+    # Alembic's fileConfig disables existing loggers in earlier migration tests.
+    monkeypatch.setattr(logging.getLogger("backend.worker"), "disabled", False)
+
+    class Provider:
+        model_id = "fake"
+
+        async def classify(self, *_args):
+            raise RuntimeError("private-provider-error-and-key")
+
+    instance = worker(database_factory, Provider())
+    await ingest(database_factory, "log", "Launch Friday", datetime.now(UTC))
+    with caplog.at_level("ERROR", logger="backend.worker"):
+        assert await instance.process_once()
+    assert "private-provider-error-and-key" not in caplog.text
+    records = [record for record in caplog.records if record.name == "backend.worker"]
+    assert records[-1].error_type == "RuntimeError"
+    assert records[-1].exc_info is None
+
+
+@pytest.mark.parametrize("failure", [TaskConfigurationError, TaskInputError])
+async def test_worker_does_not_retry_invalid_task_contract(database_factory, failure):
+    class Provider:
+        model_id = "fake"
+
+        async def classify(self, *_args):
+            raise failure("invalid task contract")
+
+    instance = worker(database_factory, Provider())
+    record_id = await ingest(database_factory, "contract", "Launch Friday", datetime.now(UTC))
+    assert await instance.process_once()
+    assert not await instance.process_once()
+    async with database_factory() as session:
+        job = await session.scalar(
+            select(ProcessingJobRecord).where(ProcessingJobRecord.message_record_id == record_id)
+        )
+        assert (job.status, job.model_call_count) == ("DEAD", 1)
+        assert await session.scalar(select(func.count()).select_from(DiscordActionRecord)) == 0
+
+
+async def test_worker_persists_task_route_with_decision(database_factory):
+    route = {"task": "topic_classification", "version": "task-routing-v1", "mode": "task"}
+
+    class Provider:
+        model_id = "meta-test-model"
+
+        async def classify(self, message, *_args):
+            return ClassificationResult(
+                decision=TopicDecision(
+                    outcome="new",
+                    title="Launch",
+                    confidence=0.8,
+                    reason="launch plan",
+                    summary="Launch Friday",
+                    evidence_message_ids=[message.message_id],
+                ),
+                model_id=self.model_id,
+                latency_ms=1,
+                task_route=route,
+            )
+
+    instance = worker(database_factory, Provider())
+    record_id = await ingest(database_factory, "trace", "Launch Friday", datetime.now(UTC))
+    assert await instance.process_once()
+    async with database_factory() as session:
+        decision = await session.scalar(
+            select(AIDecisionRecord).where(AIDecisionRecord.message_record_id == record_id)
+        )
+        assert decision.payload["task_route"] == route
+        job = await session.scalar(
+            select(ProcessingJobRecord).where(ProcessingJobRecord.message_record_id == record_id)
+        )
+        assert (job.status, job.model_call_count) == ("SUCCEEDED", 1)
 
 
 def worker(factory, provider):

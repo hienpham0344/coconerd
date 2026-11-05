@@ -72,7 +72,26 @@ def test_valid_assignment_retains_evidence_and_policy_version():
     checked = validate_classification(result(), message(), [candidate()], [])
     assert checked.decision.outcome == "existing"
     assert checked.decision.evidence_message_ids == ["target"]
-    assert checked.policy_version == "topic-policy-v4"
+    assert checked.policy_version == "topic-policy-v6"
+
+
+@pytest.mark.parametrize("outcome", ["new", "existing"])
+def test_chatter_cannot_create_or_update_a_topic_even_with_valid_match(outcome):
+    classified = result(
+        outcome=outcome,
+        topic_id="mobile" if outcome == "existing" else None,
+        title="Chuyện phiếm" if outcome == "new" else None,
+        summary="This must not enter the notes",
+        decisions=["This is not a real decision"],
+        is_noteworthy=False,
+    )
+    checked = validate_classification(classified, message(), [candidate()], [])
+    assert checked.decision.outcome == "irrelevant"
+    assert checked.decision.topic_id is None
+    assert checked.decision.title is None
+    assert checked.decision.summary == ""
+    assert checked.decision.decisions == []
+    assert checked.decision.defer_reason is None
 
 
 @pytest.mark.parametrize("outcome", ["new", "existing"])

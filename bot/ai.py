@@ -1,14 +1,23 @@
-"""Groq AI integration for Coconerd Discord Bot."""
+"""Meta Model API integration for Coconerd Discord Bot."""
 
-import asyncio
 import collections
 import os
-from typing import Deque, Dict, List
+from dataclasses import dataclass, field
 
-from groq import AsyncGroq, APIConnectionError, APIStatusError, RateLimitError
+from openai import APIConnectionError, APIStatusError, APITimeoutError, AsyncOpenAI, RateLimitError
+from openai.types.chat import ChatCompletion
 
-# Fallback default model as specified in requirements
-DEFAULT_MODEL = "openai/gpt-oss-20b"
+from coconerd_ai.task_routing import (
+    META_API_BASE,
+    TaskInvocation,
+    TaskKind,
+    TaskOutputError,
+    TaskRouter,
+    validate_meta_endpoint,
+)
+
+DEFAULT_API_BASE = META_API_BASE
+DEFAULT_MODEL = "muse-spark-1.3"
 
 # System prompt defining Coconerd's reworked direct, sarcastic, and chaotic personality
 SYSTEM_PROMPT = """You are Coconerd (🥥), a chaotic, sarcastic, chronically-online Discord server regular who happens to be a sentient coconut.
@@ -32,27 +41,75 @@ STRICT RULES OF ENGAGEMENT:
    - Code-switching between Vietnamese and English is welcome.
 8. Slang & Emojis: Use slang (bruh, bro, chat, cooked, lore, side quest, 💀, 😭) naturally, NOT in every single sentence. Do not force coconut puns into every reply."""
 
-# Bounded in-memory conversation context per channel (keeps last 8 turns)
+# Bounded in-memory conversation context per channel (keeps last 8 messages)
 # Key: channel_id -> Deque of message dicts {"role": ..., "content": ...}
-_channel_histories: Dict[int, Deque[dict]] = {}
+_channel_histories: dict[int, collections.deque[dict]] = {}
 MAX_CHANNEL_HISTORY = 8
 
 
-def get_groq_config() -> tuple[str | None, str]:
-    """Retrieves and validates Groq API key and model name from environment."""
-    api_key = os.getenv("GROQ_API_KEY", "").strip()
-    model = os.getenv("GROQ_MODEL", "").strip() or DEFAULT_MODEL
+@dataclass(frozen=True)
+class MetaConfig:
+    api_key: str = field(repr=False)
+    base_url: str
+    model: str
+    max_tokens: int
+    reasoning_effort: str
+    router: TaskRouter
 
-    placeholder_values = {
-        "your_groq_api_key_here",
-        "your_groq_api_key",
-        "your_api_key",
-        "",
-    }
-    if not api_key or api_key.lower() in placeholder_values:
-        return None, model
 
-    return api_key, model
+def _env_value(*names: str, default: str = "") -> str:
+    for name in names:
+        if name in os.environ:
+            return os.environ[name].strip()
+    return default
+
+
+def get_meta_config() -> MetaConfig | None:
+    """Use the worker's Meta configuration without requiring backend dependencies."""
+    api_key = _env_value(
+        "COCONERD_MODEL_API_KEY", "MODEL_API_KEY", "COCONERD_META_API_KEY", "META_API_KEY"
+    )
+    if not api_key or api_key.lower().startswith(("your_", "replace_")):
+        print("ℹ️ Chưa cấu hình COCONERD_MODEL_API_KEY hợp lệ; dùng phản hồi meme có sẵn.")
+        return None
+
+    try:
+        base_url = validate_meta_endpoint(
+            _env_value("COCONERD_META_API_BASE", "META_API_BASE") or DEFAULT_API_BASE
+        )
+        model = _env_value("COCONERD_META_MODEL_NAME", "META_MODEL_NAME") or DEFAULT_MODEL
+        reasoning_effort = _env_value(
+            "COCONERD_LLM_REASONING_EFFORT", "LLM_REASONING_EFFORT", default="low"
+        )
+        max_tokens = int(_env_value("COCONERD_LLM_MAX_TOKENS", "LLM_MAX_TOKENS", default="2048"))
+        router = TaskRouter(
+            model=model,
+            max_tokens=max_tokens,
+            temperature=float(_env_value("LLM_TEMPERATURE", default="0.85")),
+            reasoning_effort=reasoning_effort,
+            mode=_env_value("COCONERD_AGENT_MODE", default="task"),
+            profiles_json=_env_value("COCONERD_TASK_PROFILES", default="{}"),
+        )
+    except ValueError:
+        print("⚠️ Cấu hình Meta/task không hợp lệ; kiểm tra endpoint và các task profile.")
+        return None
+    return MetaConfig(
+        api_key=api_key,
+        base_url=base_url,
+        model=model,
+        max_tokens=max_tokens,
+        reasoning_effort=reasoning_effort,
+        router=router,
+    )
+
+
+def _validate_chat_response(response: ChatCompletion) -> str:
+    if not response.choices or response.choices[0].finish_reason != "stop":
+        raise TaskOutputError("Meta chat response is incomplete")
+    message = response.choices[0].message
+    if message.refusal or not message.content or not message.content.strip():
+        raise TaskOutputError("Meta chat response has no usable content")
+    return message.content.strip()
 
 
 def clean_mention_text(content: str, bot_id: int | None = None) -> str:
@@ -67,15 +124,14 @@ async def generate_ai_reply(
     channel_id: int,
     author_name: str,
     user_prompt: str,
-    timeout_seconds: float = 15.0,
+    timeout_seconds: float | None = None,
 ) -> str | None:
-    """Generates an AI response using AsyncGroq with bounded channel memory.
+    """Generates a Meta response with bounded channel memory.
 
     Returns the generated reply text, or None if the request fails (allowing graceful fallback).
     """
-    api_key, model = get_groq_config()
-    if not api_key:
-        print("ℹ️ GROQ_API_KEY chưa được cấu hình trong .env (hoặc là placeholder). Chuyển sang phản hồi meme.")
+    config = get_meta_config()
+    if config is None:
         return None
 
     # Retrieve or initialize bounded channel history
@@ -84,32 +140,54 @@ async def generate_ai_reply(
     history = _channel_histories[channel_id]
 
     # Format user message including author name for context
-    user_text = f"[{author_name}]: {user_prompt}" if user_prompt else f"[{author_name} pinged you without text]"
+    user_text = (
+        f"[{author_name}]: {user_prompt}"
+        if user_prompt
+        else f"[{author_name} pinged you without text]"
+    )
+
+    profile = config.router.resolve(TaskKind.CHAT)
+    context_messages = list(history)
+    input_chars = (
+        len(SYSTEM_PROMPT) + len(user_text) + sum(len(item["content"]) for item in context_messages)
+    )
+    # Drop complete old turns; never truncate the current user's request.
+    while context_messages and input_chars > profile.max_input_chars:
+        input_chars -= sum(len(item["content"]) for item in context_messages[:2])
+        del context_messages[:2]
 
     # Build messages payload
-    messages: List[dict] = [{"role": "system", "content": SYSTEM_PROMPT}]
-    messages.extend(list(history))
+    messages: list[dict] = [{"role": "system", "content": SYSTEM_PROMPT}]
+    messages.extend(context_messages)
     messages.append({"role": "user", "content": user_text})
 
     try:
-        # Instantiate AsyncGroq client
-        client = AsyncGroq(api_key=api_key)
-
-        response = await asyncio.wait_for(
-            client.chat.completions.create(
-                model=model,
-                messages=messages,
-                max_tokens=500,
-                temperature=0.85,
-            ),
-            timeout=timeout_seconds,
+        invocation = TaskInvocation(profile)
+        deadline = (
+            profile.timeout_seconds
+            if timeout_seconds is None
+            else min(profile.timeout_seconds, timeout_seconds)
         )
-
-        reply_content = response.choices[0].message.content
-        if not reply_content or not reply_content.strip():
-            return None
-
-        reply_text = reply_content.strip()
+        # The OpenAI-compatible SDK is only a transport; requests always target Meta.
+        async with AsyncOpenAI(
+            api_key=config.api_key,
+            base_url=config.base_url,
+            timeout=profile.timeout_seconds,
+            max_retries=0,
+        ) as client:
+            reply_text = await invocation.run(
+                lambda: client.chat.completions.create(
+                    model=profile.model,
+                    messages=messages,
+                    max_tokens=profile.max_tokens,
+                    reasoning_effort=profile.reasoning_effort,
+                    temperature=profile.temperature,
+                    timeout=deadline,
+                ),
+                input_chars=sum(len(item["content"]) for item in messages),
+                timeout_seconds=timeout_seconds,
+                validate=_validate_chat_response,
+            )
 
         # Update in-memory channel history
         history.append({"role": "user", "content": user_text})
@@ -121,19 +199,19 @@ async def generate_ai_reply(
 
         return reply_text
 
-    except asyncio.TimeoutError:
-        print("⚠️ Groq API timeout (vượt quá thời gian phản hồi cho phép).")
+    except (TimeoutError, APITimeoutError):
+        print("⚠️ Meta API timeout (vượt quá thời gian phản hồi cho phép).")
         return None
     except RateLimitError:
-        print("⚠️ Groq API Rate Limit: Đã đạt giới hạn yêu cầu (vui lòng thử lại sau vài giây).")
+        print("⚠️ Meta API: Đã đạt giới hạn yêu cầu (vui lòng thử lại sau vài giây).")
         return None
     except APIStatusError as e:
-        print(f"⚠️ Groq API Status Error: HTTP {e.status_code} - {e.message}")
+        print(f"⚠️ Meta API Status Error: HTTP {e.status_code}")
         return None
     except APIConnectionError:
-        print("⚠️ Groq API Connection Error: Không thể kết nối tới máy chủ Groq.")
+        print("⚠️ Meta API Connection Error: Không thể kết nối tới máy chủ Meta.")
         return None
     except Exception as e:
         # Never log or expose API keys
-        print(f"⚠️ Lỗi không xác định khi gọi Groq API: {type(e).__name__}")
+        print(f"⚠️ Lỗi không xác định khi gọi Meta API: {type(e).__name__}")
         return None

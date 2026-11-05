@@ -2,16 +2,17 @@ import hashlib
 from datetime import UTC, datetime
 
 from fastapi import Header, HTTPException, status
-from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from backend.infrastructure.database.models import ApiRateLimitRecord
+from backend.infrastructure.database.statements import conflict_insert
 
 
 def rate_limit_dependency(
     factory: async_sessionmaker[AsyncSession],
     max_requests: int = 120,
     header_name: str = "X-API-Key",
+    scope: str = "",
 ):
     async def enforce_rate_limit(
         x_api_key: str | None = Header(default=None, alias=header_name),
@@ -20,10 +21,11 @@ def rate_limit_dependency(
             return
         now = datetime.now(UTC)
         window = now.replace(second=0, microsecond=0)
-        fingerprint = hashlib.sha256(x_api_key.encode()).hexdigest()
+        identity = f"{scope}:{x_api_key}" if scope else x_api_key
+        fingerprint = hashlib.sha256(identity.encode()).hexdigest()
         async with factory() as session:
             statement = (
-                sqlite_insert(ApiRateLimitRecord)
+                conflict_insert(session, ApiRateLimitRecord)
                 .values(client_fingerprint=fingerprint, window_start=window, request_count=1)
                 .on_conflict_do_update(
                     index_elements=["client_fingerprint", "window_start"],

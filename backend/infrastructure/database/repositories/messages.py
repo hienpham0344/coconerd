@@ -2,7 +2,6 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 from sqlalchemy import select
-from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.application.read_models import MessageReadModel
@@ -13,6 +12,8 @@ from backend.infrastructure.database.models import (
     MessageTopicAssociationRecord,
     ProcessingJobRecord,
 )
+from backend.infrastructure.database.notifications import JOBS_CHANNEL, notify_transaction
+from backend.infrastructure.database.statements import conflict_insert
 
 
 class MessageRepository:
@@ -42,7 +43,7 @@ class MessageRepository:
     ) -> tuple[MessageRecord, bool]:
         record_id = message.id
         statement = (
-            sqlite_insert(MessageRecord)
+            conflict_insert(self.session, MessageRecord)
             .values(
                 id=record_id,
                 guild_id=message.guild_id,
@@ -51,6 +52,7 @@ class MessageRepository:
                 author_id=message.author_id,
                 author_name=message.author_name,
                 content=message.content,
+                attachments=message.attachments,
                 created_at=message.created_at.astimezone(UTC),
                 reply_to_message_id=message.reply_to_message_id,
             )
@@ -68,7 +70,7 @@ class MessageRepository:
             raise RuntimeError("Ingested message could not be reloaded")
         if inserted:
             await self.session.execute(
-                sqlite_insert(ProcessingJobRecord)
+                conflict_insert(self.session, ProcessingJobRecord)
                 .values(
                     id=str(uuid4()),
                     guild_id=message.guild_id,
@@ -77,6 +79,7 @@ class MessageRepository:
                 )
                 .on_conflict_do_nothing(index_elements=["message_record_id"])
             )
+            await notify_transaction(self.session, JOBS_CHANNEL)
         return record, inserted
 
     async def ingest_read_model(
@@ -150,7 +153,7 @@ class MessageRepository:
         confidence: float,
         reason: str,
     ) -> None:
-        statement = sqlite_insert(MessageTopicAssociationRecord).values(
+        statement = conflict_insert(self.session, MessageTopicAssociationRecord).values(
             id=str(uuid4()),
             guild_id=guild_id,
             message_record_id=message_record_id,
@@ -233,4 +236,5 @@ def _message_read_model(record: MessageRecord) -> MessageReadModel:
         content=record.content,
         created_at=record.created_at,
         reply_to_message_id=record.reply_to_message_id,
+        attachments=record.attachments or [],
     )

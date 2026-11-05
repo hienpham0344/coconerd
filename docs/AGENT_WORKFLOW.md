@@ -9,7 +9,8 @@ Discord bot gửi từng message gốc
   -> TopicTools đọc reply, tin gần đây, topic index và evidence
   -> local ranker chọn tối đa 5 topic cards
   -> local rule: irrelevant/defer, hoặc đặt chỗ một lượt gọi Meta
-  -> Meta trả JSON Schema theo topic-policy-v4
+  -> TaskRouter chọn profile topic_classification/topic_memory từ facts trong shortlist
+  -> Meta trả JSON Schema theo topic-policy-v6
   -> kiểm tra evidence IDs, shortlist, guild và trạng thái topic
   -> lưu association + decision + summary version + outbox trong một transaction
   -> bot claim action và ACK kết quả Discord
@@ -22,19 +23,25 @@ defer (missing_context/ambiguous)
 
 ## Tools và retrieval
 
+Luồng mention dùng task `chat`; worker dùng `topic_classification` hoặc `topic_memory`.
+Router và execution guard dùng chung, mỗi invocation có deadline/input/output limits
+và trace; phân loại và memory vẫn nằm trong một response. Chi tiết cấu hình và
+giới hạn ở [điều phối task Meta](TASK_ORCHESTRATION.md).
+
 `TopicTools` gồm `get_reply_chain`, `search_topics`, `get_topic_evidence`. Đây là hàm đọc dữ liệu do code điều phối, không phải vòng function calling trả phí. Chúng không cho model tự viết SQL, sửa DB hoặc gọi Discord.
 
-- Reply ancestry: tối đa 3 tin trước đó cùng guild/channel. Tin gần đây lấy trong 10 phút, ưu tiên từ khóa và tác giả; đây chỉ là cách chọn context.
+- Reply ancestry: tối đa 3 tin trước đó cùng guild/channel. Tin gần đây lấy trong 10 phút. Khi không có reply, giữ tin gần nhất trước khi xếp các tin còn lại theo từ khóa và tác giả.
+- Tiếp nối hội thoại: topic còn mở của tin trước đó trong cùng channel, cách tối đa 2 phút, được giữ trong shortlist với `conversation_predecessor_target`; tin nguồn có relation `conversation_predecessor`. Đây là bằng chứng để model xét ngữ nghĩa, không tự gán topic vì hai tin ở gần nhau. Explicit reply vẫn được ưu tiên.
 - Search: chỉ mục `topic_search_terms` tìm trên các topic `ACTIVE`, `DORMANT`, `RESUMED` cùng guild, không có cutoff theo độ mới. Tối đa 30 kết quả search được hợp nhất với 30 topic gần đây; direct reply được ưu tiên trong giới hạn 60 ứng viên.
 - Ranking: title có trọng số cao hơn description và summary. Chuẩn hóa dấu, alias và gợi ý viết tắt cục bộ chỉ phục vụ retrieval; tin gốc không bị sửa. Lời giải thích có thể hỗ trợ ranking, nhưng vẫn được gửi riêng khỏi target.
-- Evidence: đọc tối đa 2 tin trước đó cùng channel gắn với ứng viên đầu tiên. Tổng context tối đa 6 tin, 400 ký tự mỗi tin, 1.600 ký tự tổng; ưu tiên lời giải thích, reply, evidence rồi recent.
+- Evidence: đọc tối đa 2 tin trước đó cùng channel gắn với ứng viên đầu tiên. Tổng context tối đa 6 tin, 400 ký tự mỗi tin, 1.600 ký tự tổng; ưu tiên lời giải thích/follow-up, reply, tin tiếp nối, evidence rồi recent.
 - Prompt nhận tối đa 5 cards; title, description, overview và các danh sách được thu gọn. Summary của tối đa 60 ứng viên được đọc bằng một truy vấn batch theo guild. Card dùng 400 ký tự cuối overview và 3 item mới nhất mỗi danh sách. Chỉ mục ưu tiên phần memory gần đây; phrase alias có giới hạn hỗ trợ `sign in`/`đăng nhập`, `persistent storage engine`/`cơ sở dữ liệu`.
 
 Đây là retrieval từ khóa cục bộ. Chưa có embeddings, vector DB hay model subagent. Chỉ bổ sung retrieval ngữ nghĩa hoặc một model phụ khi evaluation cho thấy lợi ích vượt chi phí; không dùng số đo của nghiên cứu bên ngoài làm accuracy của ứng dụng.
 
 ## Policy và bằng chứng
 
-`topic-policy-v4` định nghĩa topic theo vấn đề/dự án/mục tiêu, không chỉ từ khóa chung. Reply có thể đổi chủ đề; nhiều chủ đề trong một target cần `defer`. Câu thiếu tham chiếu không mặc nhiên là `irrelevant`.
+`topic-policy-v6` định nghĩa topic theo vấn đề/dự án/mục tiêu, không chỉ từ khóa chung. Họp hackathon, chia role backend/frontend/PM và chốt giờ họp của cùng team là một topic; các khía cạnh này không bị coi là nhiều chủ đề độc lập. Kế hoạch ăn uống hoặc dự án của team khác vẫn có thể là topic mới. Reply có thể đổi chủ đề; nhiều mục tiêu độc lập trong một target cần `defer`. Câu thiếu tham chiếu không mặc nhiên là `irrelevant`.
 
 Tin rỗng dùng `local-empty`; một số câu xác nhận hoặc viết tắt mơ hồ không có reply/lời giải thích dùng `local-defer`. Cả hai không khởi tạo provider, không cần Meta key và ghi nhận zero tokens. Gợi ý ngôn ngữ dùng từ điển có giới hạn, không phải một model sửa chính tả.
 
@@ -47,6 +54,8 @@ Quyết định bị từ chối hoặc deferred không tạo summary hay action
 Chỉ `defer` vì `missing_context` hoặc `ambiguous` mới chờ. Job chờ tối đa 10 phút từ lúc quyết định; tin làm rõ phải được tạo sau target và trong vòng 10 phút tính theo timestamp target. Tin phải ở cùng guild/channel, reply trực tiếp target, hoặc cùng tác giả với tiền tố như `ý mình là`, `mình nói`, `i mean`, `to clarify`. Reply vào tin khác không được dùng. Không có reply thì chỉ xét target đang chờ gần nhất của tác giả; có tin mới hơn của tác giả xen giữa, hoặc timestamp trùng gây mơ hồ, thì không tự đoán target cũ.
 
 Khi vào WAITING, worker còn quét tối đa 30 tin có khả năng làm rõ đã đến trước quyết định, ưu tiên explicit reply. Duplicate ingestion không đánh thức lại job. Wakeup đổi trạng thái nguyên tử và tăng `reassessment_count` lên 1; lần xét lại không mở vòng chờ mới. Hết hạn được xử lý trong lần quét claim kế tiếp, giữ association `DEFERRED` và không tạo action.
+
+Hội thoại tự nhiên cũng có thể bổ sung bằng chứng: khi một tin tiếp nối trong cùng guild/channel được gán vào topic còn mở, worker đánh thức tối đa 6 tin đang chờ trong 2 phút trước đó. Không cần cùng tác giả hoặc reply trực tiếp; tin lặp nguyên nội dung và reply vào tin khác không kích hoạt luồng này. Ngữ cảnh được đánh dấu `conversation_followup`, kèm topic của tin tiếp nối trong shortlist. Model phải xét lại quan hệ ngữ nghĩa, có thể tiếp tục defer; hệ thống không tự gán topic chỉ vì hai tin ở gần nhau. Ví dụ, “hungry” có thể được xét lại khi có câu hỏi chọn món đã được gán topic. Giới hạn một lần xét lại và hai lượt gọi model vẫn áp dụng. Job đã kết thúc không tự được mở lại; bản sửa không replay lịch sử lên Discord.
 
 Worker đặt chỗ lượt gọi bằng transaction riêng **trước** khi tạo provider/gọi Meta. `model_call_count` tối đa 2 trong suốt đời job; retry hoặc rollback không xóa bộ đếm. Đây là hạn mức lần thử, không phải hóa đơn: lỗi khởi tạo hoặc crash sau đặt chỗ có thể mất một lượt dù chưa gửi HTTP. SDK không retry nội bộ. Hết hạn mức hoặc output bị cắt kết thúc job ở `DEAD`; các lỗi khác vẫn chịu giới hạn retry và hai lượt này.
 

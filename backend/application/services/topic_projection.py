@@ -22,6 +22,8 @@ async def project_topic(
         "source_author_name": message.author_name,
         "source_created_at": message.created_at.isoformat(),
         "source_content": message.content,
+        "source_attachments": message.attachments,
+        "summary": summary_data,
     }
     if not topic.sync_paused:
         if new_topic:

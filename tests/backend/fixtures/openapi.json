@@ -86,6 +86,77 @@
         }
       }
     },
+    "/api/v1/threads/{thread_id}/topic": {
+      "get": {
+        "tags": [
+          "topics"
+        ],
+        "summary": "Get Thread Topic",
+        "operationId": "get_thread_topic_api_v1_threads__thread_id__topic_get",
+        "parameters": [
+          {
+            "name": "thread_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Thread Id"
+            }
+          },
+          {
+            "name": "guild_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100,
+              "title": "Guild Id"
+            }
+          },
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Thread Topic Api V1 Threads  Thread Id  Topic Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/topics": {
       "get": {
         "tags": [
@@ -783,6 +854,136 @@
                     "type": "string"
                   },
                   "title": "Response Fail Action Api V1 Actions  Action Id  Fail Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/delivery-receipts/{key}": {
+      "get": {
+        "tags": [
+          "delivery"
+        ],
+        "summary": "Get",
+        "operationId": "get_api_v1_delivery_receipts__key__get",
+        "parameters": [
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 500,
+              "pattern": "^[A-Za-z0-9:_-]+$",
+              "title": "Key"
+            }
+          },
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeliveryReceiptResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "delivery"
+        ],
+        "summary": "Put",
+        "operationId": "put_api_v1_delivery_receipts__key__put",
+        "parameters": [
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 500,
+              "pattern": "^[A-Za-z0-9:_-]+$",
+              "title": "Key"
+            }
+          },
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeliveryReceiptResponse"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeliveryReceiptResponse"
                 }
               }
             }
@@ -1529,6 +1730,568 @@
           }
         }
       }
+    },
+    "/api/v1/admin/web/guilds": {
+      "get": {
+        "tags": [
+          "dashboard"
+        ],
+        "summary": "Guilds",
+        "operationId": "guilds_api_v1_admin_web_guilds_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 200,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "X-Admin-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Admin-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/web/guilds/{guild_id}/settings": {
+      "get": {
+        "tags": [
+          "dashboard"
+        ],
+        "summary": "Settings Read",
+        "operationId": "settings_read_api_v1_admin_web_guilds__guild_id__settings_get",
+        "parameters": [
+          {
+            "name": "guild_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Guild Id"
+            }
+          },
+          {
+            "name": "X-Admin-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Admin-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/web/guilds/{guild_id}/overview": {
+      "get": {
+        "tags": [
+          "dashboard"
+        ],
+        "summary": "Overview",
+        "operationId": "overview_api_v1_admin_web_guilds__guild_id__overview_get",
+        "parameters": [
+          {
+            "name": "guild_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Guild Id"
+            }
+          },
+          {
+            "name": "X-Admin-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Admin-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/web/guilds/{guild_id}/topics": {
+      "get": {
+        "tags": [
+          "dashboard"
+        ],
+        "summary": "Topics",
+        "operationId": "topics_api_v1_admin_web_guilds__guild_id__topics_get",
+        "parameters": [
+          {
+            "name": "guild_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Guild Id"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 200,
+              "default": "",
+              "title": "Q"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "ACTIVE",
+                    "RESUMED",
+                    "DORMANT",
+                    "CLOSED"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 12,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "X-Admin-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Admin-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/web/credentials/{kind}/{key}": {
+      "put": {
+        "tags": [
+          "dashboard"
+        ],
+        "summary": "Save Credential",
+        "operationId": "save_credential_api_v1_admin_web_credentials__kind___key__put",
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "enum": [
+                "session",
+                "oauth"
+              ],
+              "type": "string",
+              "title": "Kind"
+            }
+          },
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$",
+              "title": "Key"
+            }
+          },
+          {
+            "name": "X-Admin-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Admin-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CredentialBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "dashboard"
+        ],
+        "summary": "Credential",
+        "operationId": "credential_api_v1_admin_web_credentials__kind___key__get",
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "enum": [
+                "session",
+                "oauth"
+              ],
+              "type": "string",
+              "title": "Kind"
+            }
+          },
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$",
+              "title": "Key"
+            }
+          },
+          {
+            "name": "X-Admin-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Admin-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "dashboard"
+        ],
+        "summary": "Remove",
+        "operationId": "remove_api_v1_admin_web_credentials__kind___key__delete",
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "enum": [
+                "session",
+                "oauth"
+              ],
+              "type": "string",
+              "title": "Kind"
+            }
+          },
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$",
+              "title": "Key"
+            }
+          },
+          {
+            "name": "X-Admin-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Admin-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/web/credentials/oauth/{key}/consume": {
+      "post": {
+        "tags": [
+          "dashboard"
+        ],
+        "summary": "Consume",
+        "operationId": "consume_api_v1_admin_web_credentials_oauth__key__consume_post",
+        "parameters": [
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$",
+              "title": "Key"
+            }
+          },
+          {
+            "name": "X-Admin-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Admin-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1599,6 +2362,30 @@
               }
             ],
             "title": "Discord Message Id"
+          },
+          "previous_discord_thread_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 100
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Previous Discord Thread Id"
+          },
+          "discord_channel_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 100
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Discord Channel Id"
           }
         },
         "type": "object",
@@ -1770,6 +2557,56 @@
         ],
         "title": "CorrectMessage"
       },
+      "CredentialBody": {
+        "properties": {
+          "payload": {
+            "type": "string",
+            "maxLength": 16384,
+            "minLength": 1,
+            "title": "Payload"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At"
+          },
+          "expected_payload": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 16384,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Payload"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "payload",
+          "expires_at"
+        ],
+        "title": "CredentialBody"
+      },
+      "DeliveryReceiptResponse": {
+        "properties": {
+          "discord_id": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Discord Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "discord_id"
+        ],
+        "title": "DeliveryReceiptResponse"
+      },
       "GuildSettingsRequest": {
         "properties": {
           "enabled": {
@@ -1848,6 +2685,59 @@
         ],
         "title": "HealthResponse"
       },
+      "MessageAttachment": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Id"
+          },
+          "filename": {
+            "type": "string",
+            "maxLength": 1024,
+            "minLength": 1,
+            "title": "Filename"
+          },
+          "url": {
+            "type": "string",
+            "maxLength": 4096,
+            "minLength": 1,
+            "format": "uri",
+            "title": "Url"
+          },
+          "content_type": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content Type"
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Size"
+          },
+          "spoiler": {
+            "type": "boolean",
+            "title": "Spoiler",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "filename",
+          "url",
+          "size"
+        ],
+        "title": "MessageAttachment"
+      },
       "MessageIngestRequest": {
         "properties": {
           "guild_id": {
@@ -1901,6 +2791,14 @@
               }
             ],
             "title": "Reply To Message Id"
+          },
+          "attachments": {
+            "items": {
+              "$ref": "#/components/schemas/MessageAttachment"
+            },
+            "type": "array",
+            "maxItems": 10,
+            "title": "Attachments"
           }
         },
         "type": "object",
