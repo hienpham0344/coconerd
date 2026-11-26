@@ -27,6 +27,8 @@ class WorkflowState(TypedDict, total=False):
 
 def create_topic_workflow(provider: ModelProvider):
     def retrieve(state: WorkflowState) -> dict[str, list[TopicCandidate]]:
+        if "retrieved_candidates" in state:
+            return {"retrieved_candidates": state["retrieved_candidates"]}
         return {
             "retrieved_candidates": retrieve_topic_candidates(
                 retrieval_message(state["message"], state.get("context", [])), state["candidates"]

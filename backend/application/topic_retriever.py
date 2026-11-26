@@ -39,7 +39,17 @@ def _compact(candidate: TopicCandidate) -> TopicCandidate:
     compact_summary: dict[str, object] = {}
     overview = summary.get("overview")
     if isinstance(overview, str):
-        compact_summary["overview"] = overview[-400:]
+        kept_lines: list[str] = []
+        total_len = 0
+        for line in reversed(overview.splitlines()):
+            added_len = len(line) if not kept_lines else len(line) + 1
+            if total_len + added_len > 400:
+                break
+            kept_lines.append(line)
+            total_len += added_len
+        compact_summary["overview"] = (
+            "\n".join(reversed(kept_lines)) if kept_lines else overview[-400:]
+        )
     for key in _SUMMARY_LISTS:
         values = summary.get(key)
         if isinstance(values, list):

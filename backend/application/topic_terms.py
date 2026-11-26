@@ -66,12 +66,24 @@ def search_terms(value: str, limit: int = 24) -> list[str]:
         return []
     original = value[:8000]
     suggested = analyze_language(original).retrieval_text
-    normalized = normalize_text(f"{suggested} {original}")
-    normalized = _PHRASE_PATTERN.sub(lambda match: _PHRASE_ALIASES[match[0]], normalized)
+    suggested_norm = _PHRASE_PATTERN.sub(
+        lambda match: _PHRASE_ALIASES[match[0]], normalize_text(suggested)
+    )
+    if suggested == original:
+        tokens = suggested_norm.split()
+    else:
+        original_norm = _PHRASE_PATTERN.sub(
+            lambda match: _PHRASE_ALIASES[match[0]], normalize_text(original)
+        )
+        suggested_set = set(suggested_norm.split())
+        tokens = [
+            *suggested_norm.split(),
+            *(term for term in original_norm.split() if term not in suggested_set),
+        ]
     return list(
         dict.fromkeys(
             _ALIASES.get(term, term)
-            for term in normalized.split()
+            for term in tokens
             if term not in _STOPWORDS and len(term) <= 300
         )
     )[:limit]

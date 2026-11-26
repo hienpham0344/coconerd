@@ -127,6 +127,15 @@ def _response_field(value: object, name: str) -> Any:
     return getattr(value, name, None)
 
 
+def _strip_json_fences(content: str) -> str:
+    stripped = content.strip()
+    if stripped.startswith("```"):
+        lines = stripped.splitlines()
+        if len(lines) >= 2 and lines[0].startswith("```") and lines[-1].strip() == "```":
+            return "\n".join(lines[1:-1]).strip()
+    return stripped
+
+
 class MetaProviderError(Exception):
     """Base error from Meta Model API integration."""
 
@@ -231,7 +240,7 @@ class MetaModelProvider(ModelProvider):
                 "extract only facts from the target for initial memory. No prior facts were "
                 "supplied for replacement; memory_replacements must be empty."
             )
-        context: dict[str, Any] = {
+        prompt_payload: dict[str, Any] = {
             "message": {
                 "message_id": message.message_id,
                 "content": message.content,
@@ -254,7 +263,7 @@ class MetaModelProvider(ModelProvider):
             ],
         }
         started_at = perf_counter()
-        user_payload = json.dumps(context, ensure_ascii=False)
+        user_payload = json.dumps(prompt_payload, ensure_ascii=False)
         try:
             return await invocation.run(
                 lambda: self._client.chat.completions.create(
@@ -320,7 +329,7 @@ class MetaModelProvider(ModelProvider):
         if not content:
             raise MetaInvalidOutputError("Meta Model API returned an empty response")
         try:
-            decision = TopicDecision.model_validate_json(content)
+            decision = TopicDecision.model_validate_json(_strip_json_fences(content))
         except (ValueError, TypeError) as exc:
             raise MetaInvalidOutputError("Meta Model API returned invalid decision JSON") from exc
         latency_ms = round((perf_counter() - started_at) * 1000)
@@ -390,10 +399,10 @@ class MockMetaProvider(ModelProvider):
                 TopicDecision(
                     outcome="new",
                     title=title,
-                    description=message.content,
+                    description=message.content[:2000],
                     confidence=0.8,
                     reason="mock provider has no prior candidate topics",
-                    summary=message.content,
+                    summary=message.content[:2000],
                 )
             )
         reply_candidate = next(
@@ -407,7 +416,7 @@ class MockMetaProvider(ModelProvider):
                     topic_id=reply_candidate.id,
                     confidence=0.95,
                     reason="reply references a stored message in this topic",
-                    summary=message.content,
+                    summary=message.content[:2000],
                 )
             )
         return result(

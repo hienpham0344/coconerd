@@ -105,7 +105,12 @@ def analyze_language(content: str) -> LanguageAnalysis:
             matches = [
                 entry
                 for variant, entry in variants
-                if key == variant and (not surface.isupper() or entry["kind"] == "acknowledgement")
+                if key == variant
+                and (
+                    not surface.isupper()
+                    or entry["kind"] == "acknowledgement"
+                    or entry["retrieval_safe"]
+                )
             ]
             if matches:
                 consumed, end = size, end_word.end()
@@ -115,16 +120,21 @@ def analyze_language(content: str) -> LanguageAnalysis:
         if not matches:
             end = word.end()
             surface = word.group()
-            if surface.isascii() and surface.islower() and 4 <= len(surface) <= 16:
+            lowered = surface.casefold()
+            if (
+                surface.isascii()
+                and (surface.islower() or surface[1:].islower())
+                and 4 <= len(lowered) <= 16
+            ):
                 matches = [
                     entry
                     for variant, entry in variants
                     if entry["kind"] == "telex"
                     and " " not in variant
                     and len(variant) >= 4
-                    and surface[-1] == variant[-1]
-                    and surface[-1] in "sfrxj"
-                    and _one_edit(surface, variant)
+                    and lowered[-1] == variant[-1]
+                    and lowered[-1] in "sfrxj"
+                    and _one_edit(lowered, variant)
                 ]
                 method = "one_edit_telex"
         # Ambiguous fuzzy lookup stays ambiguous instead of selecting the nearest winner.
@@ -149,7 +159,7 @@ def analyze_language(content: str) -> LanguageAnalysis:
     for start, end, replacement in reversed(replacements):
         retrieval = retrieval[:start] + replacement + retrieval[end:]
     # A standalone reference is unresolved even when its spelling is understood.
-    phrase = _key(bounded.strip().rstrip(".!?…"))
+    phrase = _key(bounded.strip(" \t\r\n.!?…,;~"))
     acknowledgement = any(
         entry["kind"] == "acknowledgement" and phrase in entry["variants"]
         for entry in lexicon["entries"]

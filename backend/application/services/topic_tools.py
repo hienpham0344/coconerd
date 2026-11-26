@@ -14,6 +14,7 @@ from backend.application.ports.persistence import UnitOfWork
 from backend.application.read_models import ContextMessage, MessageReadModel
 from backend.application.services.message_context import bound_context, build_message_context
 from backend.application.topic_retriever import retrieval_message, retrieve_topic_candidates
+from backend.application.topic_terms import search_terms
 from backend.domain.entities import ConversationMessage
 
 
@@ -43,7 +44,21 @@ class TopicTools:
                 "conversation_predecessor",
             }
         )
-        query = f"{message.content} {anchors}"[:2400]
+        if anchors and (
+            len(message.content) > 1600
+            or len(search_terms(f"{message.content} {anchors}", limit=32)) > 24
+        ):
+            combined_terms = list(
+                dict.fromkeys(
+                    [
+                        *search_terms(message.content, limit=16),
+                        *search_terms(anchors, limit=12),
+                    ]
+                )
+            )[:24]
+            query = " ".join(combined_terms)
+        else:
+            query = f"{message.content} {anchors}"[:2400]
         indexed = await self.uow.topics.search(message.guild_id, query, limit=30)
         recent = await self.uow.topics.candidates(message.guild_id)
         return list({item.id: item for item in [*indexed, *recent]}.values())
@@ -183,7 +198,7 @@ class TopicTools:
                 )
             )
         candidates = retrieve_topic_candidates(retrieval_message(message, context), candidates)
-        if candidates:
+        if candidates and candidates[0].evidence != "local_zero_overlap_fallback":
             evidence = await self.get_topic_evidence(message, candidates[0].id)
             context = bound_context([*context, *evidence])
         return TopicContext(candidates, context, reply_topic_id)

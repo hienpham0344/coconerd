@@ -76,7 +76,12 @@ async def process_message_record(
     reply_topic_id = tools_context.reply_topic_id
     # Provider work finishes before any classification writes are staged.
     state = await create_topic_workflow(provider).ainvoke(
-        {"message": message, "candidates": candidates, "context": context}
+        {
+            "message": message,
+            "candidates": candidates,
+            "retrieved_candidates": candidates,
+            "context": context,
+        }
     )
     classification = state["classification"]
     decision = classification.decision

@@ -149,7 +149,11 @@ def validate_classification(
     decision = result.decision.model_copy(deep=True)
     reason = None
     known_ids = {message.message_id, *(item.message_id for item in context)}
-    bare_reference = analyze_language(message.content).needs_context
+    normalized = " ".join(re.findall(r"[^\W_]+", message.content.casefold()))
+    has_clarification = any(item.relation == "followup_clarification" for item in context)
+    bare_reference = analyze_language(message.content).needs_context or (
+        normalized in _ACKS and not has_clarification
+    )
     if not decision.is_noteworthy:
         decision.outcome = "irrelevant"
         decision.multiple_topics = False

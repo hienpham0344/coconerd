@@ -29,10 +29,10 @@ class BudgetedProvider:
         candidates: list[TopicCandidate],
         context: Sequence[ContextMessage] = (),
     ) -> ClassificationResult:
-        if not await self.reserve():
-            raise ModelCallBudgetExceeded("Message exhausted its two-call budget or lost its lease")
         if self.provider is None:
             self.provider = await self.factory()
+        if not await self.reserve():
+            raise ModelCallBudgetExceeded("Message exhausted its two-call budget or lost its lease")
         return await self.provider.classify(message, candidates, context)
 
     async def close(self) -> None:

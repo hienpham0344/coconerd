@@ -22,6 +22,7 @@ from backend.infrastructure.database.notifications import (
 )
 from backend.infrastructure.database.unit_of_work import SqlAlchemyUnitOfWork
 from backend.infrastructure.meta_provider import (
+    MetaAuthenticationError,
     MetaModelProvider,
     MetaOutputTruncatedError,
     MockMetaProvider,
@@ -86,7 +87,8 @@ class ConversationWorker:
                     followup_message_id=job.followup_message_id,
                 )
                 await complete_job(unit_of_work, job_id, result, owner=self.worker_id)
-            await self._heartbeat("idle")
+            with suppress(Exception):
+                await self._heartbeat("idle")
         except Exception as exc:
             logger.error(
                 "Message processing failed",
@@ -102,6 +104,7 @@ class ConversationWorker:
                 retryable=not isinstance(
                     exc,
                     (
+                        MetaAuthenticationError,
                         MetaOutputTruncatedError,
                         ModelCallBudgetExceeded,
                         TaskConfigurationError,
@@ -110,6 +113,8 @@ class ConversationWorker:
                     ),
                 ),
             )
+            with suppress(Exception):
+                await self._heartbeat("idle")
         finally:
             if provider is not None:
                 await provider.close()
@@ -158,33 +163,39 @@ class ConversationWorker:
                 await self.session_factory.kw["bind"].dispose()
 
     async def _run(self, wakeup: asyncio.Event) -> None:
-        await self._heartbeat("running")
+        with suppress(Exception):
+            await self._heartbeat("running")
         next_retention_run = datetime.now(UTC)
         try:
             while not self._stop.is_set():
                 wakeup.clear()
                 if datetime.now(UTC) >= next_retention_run:
-                    removed = await self.prune_retained_data()
-                    dormant = await self.mark_dormant_topics()
-                    if removed:
-                        logger.info(
-                            "Retention removed expired messages", extra={"status": "complete"}
-                        )
-                    if dormant:
-                        logger.info(
-                            "Inactive topics moved to dormant state",
-                            extra={"status": "complete"},
-                        )
+                    try:
+                        removed = await self.prune_retained_data()
+                        dormant = await self.mark_dormant_topics()
+                        if removed:
+                            logger.info(
+                                "Retention removed expired messages", extra={"status": "complete"}
+                            )
+                        if dormant:
+                            logger.info(
+                                "Inactive topics moved to dormant state",
+                                extra={"status": "complete"},
+                            )
+                    except Exception:
+                        logger.exception("Periodic worker maintenance failed")
                     next_retention_run = datetime.now(UTC) + timedelta(minutes=15)
                 found = await self.process_once()
                 if not found and not self._stop.is_set():
-                    await self._heartbeat("idle")
+                    with suppress(Exception):
+                        await self._heartbeat("idle")
                     with suppress(TimeoutError):
                         await asyncio.wait_for(
                             wakeup.wait(), timeout=self.settings.worker_poll_seconds
                         )
         finally:
-            await self._heartbeat("stopped")
+            with suppress(Exception):
+                await self._heartbeat("stopped")
 
 
 async def run_worker() -> None:

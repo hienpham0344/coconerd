@@ -27,7 +27,13 @@ def bound_context(items: list[ContextMessage]) -> list[ContextMessage]:
     }
     selected = {}
     remaining = MAX_CONTEXT_CHARS
-    for item in sorted(items, key=lambda item: priorities.get(item.relation, 4)):
+    for item in sorted(
+        items,
+        key=lambda item: (
+            priorities.get(item.relation, 4),
+            -_utc(item.created_at).timestamp() if item.relation == "recent" else 0.0,
+        ),
+    ):
         if item.message_id in selected or not item.content.strip():
             continue
         content = item.content[: min(remaining, MAX_MESSAGE_CHARS)]
@@ -81,7 +87,7 @@ async def build_message_context(
         if (
             ancestor is None
             or ancestor.channel_id != target.channel_id
-            or _utc(ancestor.created_at) >= next_time
+            or _utc(ancestor.created_at) > next_time
         ):
             break
         include(ancestor, "reply_ancestor")

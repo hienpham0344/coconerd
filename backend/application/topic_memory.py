@@ -1,5 +1,7 @@
 """Pure reduction of topic facts; replacement requires a known fact and source quote."""
 
+import unicodedata
+
 from backend.application.contracts import TopicDecision
 
 MEMORY_LIST_FIELDS = ("proposals", "decisions", "open_questions", "action_items")
@@ -31,25 +33,31 @@ def validate_memory_replacements(
 ) -> None:
     facts = _facts(previous)
     seen = set()
+    normalized_source = unicodedata.normalize("NFC", source_text)
     for change in decision.memory_replacements:
-        key = (change.field, change.previous)
+        previous_fact = change.previous.strip()
+        replacement_fact = change.replacement.strip() if change.replacement is not None else None
+        quote = unicodedata.normalize("NFC", change.quote.strip())
+        key = (change.field, previous_fact)
         if (
             decision.outcome != "existing"
             or key in seen
-            or change.previous not in facts[change.field]
-            or not change.quote.strip()
-            or change.quote not in source_text
-            or (change.replacement is not None and not change.replacement.strip())
+            or not previous_fact
+            or previous_fact not in facts[change.field]
+            or not quote
+            or quote not in normalized_source
+            or (change.replacement is not None and not replacement_fact)
         ):
             raise InvalidMemoryUpdate(
                 "Memory replacement lacks a unique known fact or source quote"
             )
-        additions = (
+        raw_additions = (
             decision.summary.splitlines()
             if change.field == "overview"
             else getattr(decision, change.field)
         )
-        if change.previous in additions and change.replacement != change.previous:
+        additions = [item.strip() for item in raw_additions if item.strip()]
+        if previous_fact in additions and replacement_fact != previous_fact:
             raise InvalidMemoryUpdate("A superseded fact cannot also be reintroduced")
         seen.add(key)
 
@@ -66,9 +74,13 @@ def merge_topic_memory(
     validate_memory_replacements(previous, decision, source_text)
     facts = _facts(previous)
     for change in decision.memory_replacements:
-        facts[change.field] = [item for item in facts[change.field] if item != change.previous]
+        previous_fact = change.previous.strip()
+        facts[change.field] = [item for item in facts[change.field] if item != previous_fact]
         if change.replacement is not None:
-            facts[change.field].append(change.replacement.strip())
+            if change.field == "overview":
+                facts[change.field].extend(change.replacement.splitlines())
+            else:
+                facts[change.field].append(change.replacement.strip())
     facts["overview"].extend(decision.summary.splitlines())
     if not previous and not facts["overview"] and description.strip():
         facts["overview"] = description.splitlines()

@@ -1,11 +1,14 @@
 from collections.abc import Sequence
 from datetime import datetime
-from typing import Literal, Protocol
+from typing import Annotated, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from backend.application.read_models import ContextMessage
 from backend.domain.entities import ConversationMessage
+
+DecisionFact = Annotated[str, Field(max_length=500)]
+EvidenceId = Annotated[str, Field(max_length=100)]
 
 
 class TopicCandidate(BaseModel):
@@ -32,16 +35,16 @@ class TopicDecision(BaseModel):
     outcome: Literal["new", "existing", "defer", "irrelevant"]
     topic_id: str | None = None
     title: str | None = None
-    description: str = ""
+    description: str = Field(default="", max_length=2000)
     confidence: float = Field(ge=0.0, le=1.0)
-    reason: str
-    proposals: list[str] = Field(default_factory=list)
-    decisions: list[str] = Field(default_factory=list)
-    open_questions: list[str] = Field(default_factory=list)
-    action_items: list[str] = Field(default_factory=list)
-    summary: str = ""
+    reason: str = Field(max_length=1000)
+    proposals: list[DecisionFact] = Field(default_factory=list, max_length=20)
+    decisions: list[DecisionFact] = Field(default_factory=list, max_length=20)
+    open_questions: list[DecisionFact] = Field(default_factory=list, max_length=20)
+    action_items: list[DecisionFact] = Field(default_factory=list, max_length=20)
+    summary: str = Field(default="", max_length=2000)
     memory_replacements: list[MemoryReplacement] = Field(default_factory=list, max_length=10)
-    evidence_message_ids: list[str] = Field(default_factory=list, max_length=7)
+    evidence_message_ids: list[EvidenceId] = Field(default_factory=list, max_length=7)
     defer_reason: (
         Literal[
             "missing_context",

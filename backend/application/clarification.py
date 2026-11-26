@@ -2,6 +2,7 @@
 
 from datetime import UTC, datetime, timedelta
 
+from backend.application.language_normalization import analyze_language
 from backend.application.read_models import MessageReadModel
 from backend.application.topic_terms import normalize_text
 
@@ -35,11 +36,19 @@ def is_clarification(target: MessageReadModel, followup: MessageReadModel) -> bo
         <= utc(target.created_at) + timedelta(seconds=DEFER_WINDOW_SECONDS)
     ):
         return False
-    text = normalize_text(followup.content)
+    text = normalize_text(analyze_language(followup.content).retrieval_text)
     if not text:
         return False
     if followup.reply_to_message_id:
         return followup.reply_to_message_id == target.discord_message_id
     return target.author_id == followup.author_id and any(
-        text.startswith(prefix) for prefix in ("y minh la ", "minh noi ", "i mean ", "to clarify ")
+        text.startswith(prefix)
+        for prefix in (
+            "y minh la ",
+            "minh noi ",
+            "y toi la ",
+            "toi noi ",
+            "i mean ",
+            "to clarify ",
+        )
     )
