@@ -129,6 +129,20 @@ class JobRepository:
                 ProcessingJobRecord.lease_expires_at <= now,
             ),
         )
+        await self.session.execute(
+            update(ProcessingJobRecord)
+            .execution_options(synchronize_session=False)
+            .where(
+                available,
+                ProcessingJobRecord.attempt_count >= ProcessingJobRecord.max_attempts,
+            )
+            .values(
+                status=JobStatus.DEAD,
+                lease_owner=None,
+                lease_expires_at=None,
+                error_type="LeaseAttemptsExhausted",
+            )
+        )
         job_id = await self.session.scalar(
             select(ProcessingJobRecord.id)
             .where(
@@ -138,22 +152,9 @@ class JobRepository:
             )
             .order_by(ProcessingJobRecord.created_at)
             .limit(1)
+            .with_for_update(skip_locked=True)
         )
         if job_id is None:
-            await self.session.execute(
-                update(ProcessingJobRecord)
-                .execution_options(synchronize_session=False)
-                .where(
-                    available,
-                    ProcessingJobRecord.attempt_count >= ProcessingJobRecord.max_attempts,
-                )
-                .values(
-                    status=JobStatus.DEAD,
-                    lease_owner=None,
-                    lease_expires_at=None,
-                    error_type="LeaseAttemptsExhausted",
-                )
-            )
             return None
         claim_result = await self.session.execute(
             update(ProcessingJobRecord)

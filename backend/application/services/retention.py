@@ -20,22 +20,22 @@ async def prune_retained_data(uow: UnitOfWork) -> int:
         for action in await uow.retention.actions(guild.guild_id):
             if action.payload.get("source_message_id") not in source_ids:
                 continue
-            await uow.actions.update(
-                action.id,
-                payload={
+            changes: dict[str, object] = {
+                "payload": {
                     key: value
                     for key, value in action.payload.items()
                     if key not in {"source_content", "source_attachments"}
                 },
-            )
+            }
             if action.status in {"PENDING", "CLAIMED"}:
-                await uow.actions.update(
-                    action.id,
+                changes.update(
                     status="DEAD",
                     error_type="retention_expired",
                     lease_owner=None,
                     lease_expires_at=None,
+                    lease_token=None,
                 )
+            await uow.actions.update(action.id, **changes)
         for summary in await uow.retention.summary_sources(guild.guild_id):
             await uow.retention.replace_summary_sources(
                 summary.id,

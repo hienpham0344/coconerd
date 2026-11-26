@@ -13,7 +13,10 @@ def create_session_factory(settings: Settings) -> async_sessionmaker[AsyncSessio
         file_path = url.removeprefix("sqlite+aiosqlite:///").split("?", maxsplit=1)[0]
         if file_path and file_path != ":memory:":
             Path(file_path).parent.mkdir(parents=True, exist_ok=True)
-    engine = create_async_engine(url, pool_pre_ping=True)
+    engine_kwargs: dict[str, object] = {"pool_pre_ping": True}
+    if url.startswith("postgresql"):
+        engine_kwargs["pool_recycle"] = 300
+    engine = create_async_engine(url, **engine_kwargs)
     if url.startswith("sqlite+"):
 
         @event.listens_for(engine.sync_engine, "connect")

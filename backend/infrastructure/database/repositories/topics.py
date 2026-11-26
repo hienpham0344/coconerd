@@ -2,8 +2,10 @@ from datetime import datetime
 from uuid import uuid4
 
 from sqlalchemy import delete, func, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.application.errors import Conflict
 from backend.application.read_models import TopicReadModel
 from backend.application.topic_terms import search_terms
 from backend.domain.entities import ConversationTopic
@@ -124,7 +126,7 @@ class TopicRepository:
         )
         self.session.add(record)
         # Child rows are staged later in the same transaction; persist the parent first.
-        await self.session.flush([record])
+        await self.session.flush()
         await index_topic(self.session, record, {})
         return record
 
@@ -181,7 +183,8 @@ class TopicRepository:
     async def inactive(self, cutoff: datetime) -> list[TopicReadModel]:
         records = await self.session.scalars(
             select(TopicRecord).where(
-                TopicRecord.status == "ACTIVE", TopicRecord.last_activity_at < cutoff
+                TopicRecord.status.in_([TopicStatus.ACTIVE.value, TopicStatus.RESUMED.value]),
+                TopicRecord.last_activity_at < cutoff,
             )
         )
         return [_topic_read_model(record) for record in records]
@@ -203,24 +206,48 @@ class TopicRepository:
     async def replace_thread(
         self, guild_id: str, topic_id: str, previous: str | None, thread_id: str
     ) -> bool:
-        result = await self.session.execute(
-            update(TopicRecord)
-            .where(
-                TopicRecord.guild_id == guild_id,
-                TopicRecord.id == topic_id,
-                TopicRecord.discord_thread_id == previous,
+        duplicate = await self.session.scalar(
+            select(TopicRecord.id).where(
+                TopicRecord.discord_thread_id == thread_id,
+                TopicRecord.id != topic_id,
             )
-            .values(discord_thread_id=thread_id)
-            .execution_options(synchronize_session=False)
         )
+        if duplicate is not None:
+            raise Conflict("Discord thread ID is already assigned to another topic")
+        try:
+            result = await self.session.execute(
+                update(TopicRecord)
+                .where(
+                    TopicRecord.guild_id == guild_id,
+                    TopicRecord.id == topic_id,
+                    TopicRecord.discord_thread_id == previous,
+                )
+                .values(discord_thread_id=thread_id)
+                .execution_options(synchronize_session=False)
+            )
+            await self.session.flush()
+        except IntegrityError as exc:
+            raise Conflict("Discord thread ID is already assigned to another topic") from exc
         return result.rowcount == 1
 
     async def set_thread(self, guild_id: str, topic_id: str, thread_id: str) -> None:
-        await self.session.execute(
-            update(TopicRecord)
-            .where(TopicRecord.guild_id == guild_id, TopicRecord.id == topic_id)
-            .values(discord_thread_id=thread_id)
+        duplicate = await self.session.scalar(
+            select(TopicRecord.id).where(
+                TopicRecord.discord_thread_id == thread_id,
+                TopicRecord.id != topic_id,
+            )
         )
+        if duplicate is not None:
+            raise Conflict("Discord thread ID is already assigned to another topic")
+        try:
+            await self.session.execute(
+                update(TopicRecord)
+                .where(TopicRecord.guild_id == guild_id, TopicRecord.id == topic_id)
+                .values(discord_thread_id=thread_id)
+            )
+            await self.session.flush()
+        except IntegrityError as exc:
+            raise Conflict("Discord thread ID is already assigned to another topic") from exc
 
     async def delete_data(self, guild_id: str, topic_id: str) -> None:
         message_record_ids = select(MessageTopicAssociationRecord.message_record_id).where(

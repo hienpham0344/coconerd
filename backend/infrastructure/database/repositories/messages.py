@@ -220,7 +220,10 @@ class MessageRepository:
             .limit(limit)
         )
         if before is not None:
-            query = query.where(MessageRecord.created_at < before)
+            before_utc = (
+                before.replace(tzinfo=UTC) if before.tzinfo is None else before.astimezone(UTC)
+            )
+            query = query.where(MessageRecord.created_at < before_utc)
         result = await self.session.scalars(query)
         return list(result)
 

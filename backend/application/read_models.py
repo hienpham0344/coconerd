@@ -53,6 +53,8 @@ class ActionReadModel:
     status: str
     payload: dict[str, object]
     dependency_id: str | None
+    discord_thread_id: str | None = None
+    discord_summary_message_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,12 +90,12 @@ class SummaryReadModel:
 
 @dataclass(frozen=True, slots=True)
 class ActionState(ActionReadModel):
-    lease_owner: str | None
-    attempt_count: int
-    max_attempts: int
-    discord_thread_id: str | None
-    discord_message_id: str | None
+    lease_owner: str | None = None
+    attempt_count: int = 0
+    max_attempts: int = 5
+    discord_message_id: str | None = None
     lease_token: str | None = None
+    error_type: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

@@ -1,3 +1,5 @@
+from datetime import UTC, datetime
+
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -29,10 +31,25 @@ class GuildRepository:
         return GuildSettings(
             record.guild_id,
             record.enabled,
-            record.allowed_channel_ids,
+            list(record.allowed_channel_ids),
             record.retention_days,
             record.output_channel_id,
         )
+
+    async def list_settings(self) -> list[GuildSettings]:
+        rows = await self.session.scalars(
+            select(GuildSettingsRecord).order_by(GuildSettingsRecord.guild_id)
+        )
+        return [
+            GuildSettings(
+                guild_id=row.guild_id,
+                enabled=row.enabled,
+                allowed_channel_ids=list(row.allowed_channel_ids),
+                retention_days=row.retention_days,
+                output_channel_id=row.output_channel_id,
+            )
+            for row in rows
+        ]
 
     async def channel_is_enabled(self, guild_id: str, channel_id: str) -> bool:
         setting = await self.session.get(GuildSettingsRecord, guild_id)
@@ -47,6 +64,7 @@ class GuildRepository:
         record.allowed_channel_ids = settings.allowed_channel_ids
         record.retention_days = settings.retention_days
         record.output_channel_id = settings.output_channel_id
+        record.updated_at = datetime.now(UTC)
         return settings
 
     async def delete_data(self, guild_id: str) -> None:

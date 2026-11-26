@@ -1,6 +1,6 @@
 """Passive queries and writes for retention workflows."""
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -43,9 +43,17 @@ class RetentionRepository:
         ]
 
     async def messages_before(self, guild_id: str, cutoff: datetime) -> list[RetainedMessage]:
+        now = datetime.now(UTC)
+        active_claimed_jobs = select(ProcessingJobRecord.message_record_id).where(
+            ProcessingJobRecord.guild_id == guild_id,
+            ProcessingJobRecord.status == "CLAIMED",
+            ProcessingJobRecord.lease_expires_at > now,
+        )
         rows = await self.session.scalars(
             select(MessageRecord).where(
-                MessageRecord.guild_id == guild_id, MessageRecord.created_at < cutoff
+                MessageRecord.guild_id == guild_id,
+                MessageRecord.created_at < cutoff,
+                ~MessageRecord.id.in_(active_claimed_jobs),
             )
         )
         return [RetainedMessage(row.id, row.discord_message_id) for row in rows]
@@ -73,11 +81,13 @@ class RetentionRepository:
         )
 
     async def delete_messages(self, record_ids: list[str]) -> None:
-        for model in (
-            ReviewEventRecord,
-            ProcessingJobRecord,
-            AIDecisionRecord,
-            MessageTopicAssociationRecord,
-        ):
-            await self.session.execute(delete(model).where(model.message_record_id.in_(record_ids)))
-        await self.session.execute(delete(MessageRecord).where(MessageRecord.id.in_(record_ids)))
+        for index in range(0, len(record_ids), 500):
+            batch = record_ids[index : index + 500]
+            for model in (
+                ReviewEventRecord,
+                ProcessingJobRecord,
+                AIDecisionRecord,
+                MessageTopicAssociationRecord,
+            ):
+                await self.session.execute(delete(model).where(model.message_record_id.in_(batch)))
+            await self.session.execute(delete(MessageRecord).where(MessageRecord.id.in_(batch)))

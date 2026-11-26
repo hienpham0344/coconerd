@@ -1,7 +1,7 @@
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from sqlalchemy import and_, or_, select, update
+from sqlalchemy import and_, case, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
@@ -14,6 +14,35 @@ from backend.infrastructure.database.notifications import ACTIONS_CHANNEL, notif
 class ActionRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
+
+    async def _topic_discord_context(
+        self, topic_ids: set[str]
+    ) -> tuple[dict[str, str | None], dict[str, str | None]]:
+        if not topic_ids:
+            return {}, {}
+        topics = await self.session.scalars(
+            select(TopicRecord).where(TopicRecord.id.in_(topic_ids))
+        )
+        thread_ids: dict[str, str | None] = {topic.id: topic.discord_thread_id for topic in topics}
+        summary_actions = await self.session.scalars(
+            select(DiscordActionRecord)
+            .where(
+                DiscordActionRecord.topic_id.in_(topic_ids),
+                DiscordActionRecord.action_type == ActionType.UPSERT_SUMMARY.value,
+                DiscordActionRecord.status == ActionStatus.SUCCEEDED.value,
+                DiscordActionRecord.discord_message_id.is_not(None),
+            )
+            .order_by(
+                DiscordActionRecord.completed_at.desc(),
+                DiscordActionRecord.created_at.desc(),
+                DiscordActionRecord.id.desc(),
+            )
+        )
+        summary_message_ids: dict[str, str | None] = {}
+        for action in summary_actions:
+            if action.topic_id not in summary_message_ids:
+                summary_message_ids[action.topic_id] = action.discord_message_id
+        return thread_ids, summary_message_ids
 
     async def pending_create(self, guild_id: str, topic_id: str) -> ActionReadModel | None:
         record = await self.session.scalar(
@@ -28,7 +57,14 @@ class ActionRepository:
             .order_by(DiscordActionRecord.created_at)
             .limit(1)
         )
-        return _action_read_model(record) if record is not None else None
+        if record is None:
+            return None
+        thread_ids, summary_ids = await self._topic_discord_context({record.topic_id})
+        return _action_read_model(
+            record,
+            discord_thread_id=record.discord_thread_id or thread_ids.get(record.topic_id),
+            discord_summary_message_id=summary_ids.get(record.topic_id),
+        )
 
     async def add_read_model(
         self,
@@ -43,7 +79,12 @@ class ActionRepository:
         record = await self.add(
             guild_id, channel_id, topic_id, action_type, payload, dependency_id, max_attempts
         )
-        return _action_read_model(record)
+        thread_ids, summary_ids = await self._topic_discord_context({record.topic_id})
+        return _action_read_model(
+            record,
+            discord_thread_id=record.discord_thread_id or thread_ids.get(record.topic_id),
+            discord_summary_message_id=summary_ids.get(record.topic_id),
+        )
 
     async def add(
         self,
@@ -55,6 +96,23 @@ class ActionRepository:
         dependency_id: str | None = None,
         max_attempts: int = 5,
     ) -> DiscordActionRecord:
+        if action_type == ActionType.UPSERT_SUMMARY:
+            await self.session.execute(
+                update(DiscordActionRecord)
+                .execution_options(synchronize_session=False)
+                .where(
+                    DiscordActionRecord.guild_id == guild_id,
+                    DiscordActionRecord.topic_id == topic_id,
+                    DiscordActionRecord.action_type == ActionType.UPSERT_SUMMARY.value,
+                    DiscordActionRecord.status == ActionStatus.PENDING.value,
+                    DiscordActionRecord.superseded.is_(False),
+                )
+                .values(
+                    status=ActionStatus.CANCELLED.value,
+                    superseded=True,
+                    error_type="SupersededByNewerSummary",
+                )
+            )
         record = DiscordActionRecord(
             id=str(uuid4()),
             guild_id=guild_id,
@@ -73,6 +131,11 @@ class ActionRepository:
         self, owner: str, limit: int, now: datetime, lease_expires_at: datetime
     ) -> list[ClaimedAction]:
         records = await self._claim(owner, limit, now, lease_expires_at)
+        if not records:
+            return []
+        thread_ids, summary_ids = await self._topic_discord_context(
+            {record.topic_id for record in records}
+        )
         return [
             ClaimedAction(
                 id=record.id,
@@ -83,6 +146,8 @@ class ActionRepository:
                 status=record.status,
                 payload=record.payload,
                 dependency_id=record.dependency_id,
+                discord_thread_id=record.discord_thread_id or thread_ids.get(record.topic_id),
+                discord_summary_message_id=summary_ids.get(record.topic_id),
                 lease_token=record.lease_token,
             )
             for record in records
@@ -172,11 +237,15 @@ class ActionRepository:
             )
             .order_by(DiscordActionRecord.created_at, DiscordActionRecord.id)
             .limit(limit)
+            .with_for_update(skip_locked=True)
         )
         ids = list((await self.session.scalars(eligible)).all())
         if not ids:
             return []
-        lease_token = uuid4().hex
+        tokens = {action_id: uuid4().hex for action_id in ids}
+        lease_token_expr: object = (
+            tokens[ids[0]] if len(ids) == 1 else case(tokens, value=DiscordActionRecord.id)
+        )
         await self.session.execute(
             update(DiscordActionRecord)
             .execution_options(synchronize_session=False)
@@ -184,7 +253,7 @@ class ActionRepository:
             .values(
                 status=ActionStatus.CLAIMED,
                 lease_owner=owner,
-                lease_token=lease_token,
+                lease_token=lease_token_expr,
                 lease_expires_at=lease_expires_at,
                 attempt_count=DiscordActionRecord.attempt_count + 1,
             )
@@ -195,11 +264,12 @@ class ActionRepository:
                 DiscordActionRecord.id.in_(ids),
                 DiscordActionRecord.status == ActionStatus.CLAIMED,
                 DiscordActionRecord.lease_owner == owner,
-                DiscordActionRecord.lease_token == lease_token,
+                DiscordActionRecord.lease_token.in_(list(tokens.values())),
             )
+            .order_by(DiscordActionRecord.created_at, DiscordActionRecord.id)
             .execution_options(populate_existing=True)
         )
-        return list(result)
+        return [record for record in result if record.lease_token == tokens.get(record.id)]
 
     async def get(self, action_id: str) -> ActionState | None:
         record = await self.session.get(DiscordActionRecord, action_id)
@@ -220,6 +290,7 @@ class ActionRepository:
             discord_thread_id=record.discord_thread_id,
             discord_message_id=record.discord_message_id,
             lease_token=record.lease_token,
+            error_type=record.error_type,
         )
 
     async def update(self, action_id: str, **changes: object) -> None:
@@ -245,7 +316,12 @@ class ActionRepository:
         return changed.rowcount == 1
 
 
-def _action_read_model(record: DiscordActionRecord) -> ActionReadModel:
+def _action_read_model(
+    record: DiscordActionRecord,
+    *,
+    discord_thread_id: str | None = None,
+    discord_summary_message_id: str | None = None,
+) -> ActionReadModel:
     return ActionReadModel(
         id=record.id,
         guild_id=record.guild_id,
@@ -255,4 +331,6 @@ def _action_read_model(record: DiscordActionRecord) -> ActionReadModel:
         status=record.status,
         payload=record.payload,
         dependency_id=record.dependency_id,
+        discord_thread_id=discord_thread_id,
+        discord_summary_message_id=discord_summary_message_id,
     )

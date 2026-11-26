@@ -1,9 +1,17 @@
 """Explicit reconciliation and recovery of external Discord effects."""
 
+from typing import Any
+
 from backend.application.errors import Conflict, NotFound
 from backend.application.ports.persistence import UnitOfWork
 from backend.application.review_contracts import RecoverAction, ResumeTopicSync
 from backend.application.services.review_audit import record, replay
+
+
+async def list_guild_review_queue(
+    uow: UnitOfWork, guild_id: str, limit: int = 50
+) -> dict[str, Any]:
+    return await uow.reviews.review_queue(guild_id, limit)
 
 
 async def topic_sync_state(

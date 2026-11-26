@@ -104,6 +104,12 @@ class DashboardRepository:
         return {"items": items, "total": total, "limit": limit, "offset": offset}
 
     async def save_credential(self, kind, key, payload, expires_at, expected_payload=None):
+        expires_utc = (
+            expires_at.replace(tzinfo=UTC)
+            if expires_at.tzinfo is None
+            else expires_at.astimezone(UTC)
+        )
+        now = datetime.now(UTC)
         if expected_payload is not None:
             changed = await self.session.scalar(
                 update(DashboardCredentialRecord)
@@ -111,26 +117,24 @@ class DashboardRepository:
                     DashboardCredentialRecord.kind == kind,
                     DashboardCredentialRecord.key_hash == key,
                     DashboardCredentialRecord.payload == expected_payload,
-                    DashboardCredentialRecord.expires_at > datetime.now(UTC),
+                    DashboardCredentialRecord.expires_at > now,
                 )
-                .values(payload=payload, expires_at=expires_at)
+                .values(payload=payload, expires_at=expires_utc)
                 .returning(DashboardCredentialRecord.key_hash)
             )
             await self.session.commit()
             return changed is not None
         await self.session.execute(
-            delete(DashboardCredentialRecord).where(
-                DashboardCredentialRecord.expires_at <= datetime.now(UTC)
-            )
+            delete(DashboardCredentialRecord).where(DashboardCredentialRecord.expires_at <= now)
         )
         await self.session.execute(
             conflict_insert(self.session, DashboardCredentialRecord)
-            .values(kind=kind, key_hash=key, payload=payload, expires_at=expires_at)
+            .values(kind=kind, key_hash=key, payload=payload, expires_at=expires_utc)
             .on_conflict_do_update(
                 index_elements=["kind", "key_hash"],
                 set_={
                     "payload": payload,
-                    "expires_at": expires_at,
+                    "expires_at": expires_utc,
                 },
             )
         )

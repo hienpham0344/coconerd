@@ -3,7 +3,7 @@
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from sqlalchemy import or_, select, update
+from sqlalchemy import and_, or_, select, update
 from sqlalchemy.exc import IntegrityError
 
 from backend.application.errors import Conflict
@@ -73,6 +73,9 @@ class ReviewRepository:
 
     async def sync_state(self, guild_id, topic_id, limit, offset):
         return await review_queries.sync_state(self.session, guild_id, topic_id, limit, offset)
+
+    async def review_queue(self, guild_id, limit=50):
+        return await review_queries.review_queue(self.session, guild_id, limit)
 
     async def finish_job(self, guild_id, message_record_id):
         # An UPDATE is the transaction's write fence; a later worker complete cannot pass it.
@@ -154,6 +157,7 @@ class ReviewRepository:
     async def cancel_actions(self, guild_id, topic_ids):
         if not topic_ids:
             return []
+        now = datetime.now(UTC)
         scope = (
             DiscordActionRecord.guild_id == guild_id,
             DiscordActionRecord.topic_id.in_(topic_ids),
@@ -163,18 +167,26 @@ class ReviewRepository:
             .where(
                 *scope,
                 DiscordActionRecord.status == "CLAIMED",
+                DiscordActionRecord.lease_expires_at > now,
             )
             .limit(1)
         )
         if claimed:
             raise Conflict("Resolve claimed Discord actions before correcting the topic")
+        cancellable = or_(
+            DiscordActionRecord.status == "PENDING",
+            and_(
+                DiscordActionRecord.status == "CLAIMED",
+                DiscordActionRecord.lease_expires_at <= now,
+            ),
+        )
         # Preserve sent actions and attempted DEAD actions as external-effect evidence.
         ids = list(
             await self.session.scalars(
                 select(DiscordActionRecord.id)
                 .where(
                     *scope,
-                    DiscordActionRecord.status == "PENDING",
+                    cancellable,
                 )
                 .order_by(DiscordActionRecord.id)
             )
@@ -183,13 +195,14 @@ class ReviewRepository:
             update(DiscordActionRecord)
             .where(
                 *scope,
-                DiscordActionRecord.status == "PENDING",
+                cancellable,
             )
             .values(
                 status="CANCELLED",
                 error_type="ManualCorrection",
                 lease_owner=None,
                 lease_expires_at=None,
+                lease_token=None,
             )
             .execution_options(synchronize_session=False)
         )

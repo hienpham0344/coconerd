@@ -30,7 +30,7 @@ class DeliveryReceiptRecord(Base):
     key: Mapped[str] = mapped_column(String(500), primary_key=True)
     discord_id: Mapped[str] = mapped_column(String(100), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=utcnow, nullable=False
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
     )
 
 
@@ -43,7 +43,7 @@ class GuildSettingsRecord(Base):
     output_channel_id: Mapped[str | None] = mapped_column(String(100))
     retention_days: Mapped[int] = mapped_column(Integer, default=365, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=utcnow, nullable=False
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
     )
 
 
@@ -292,7 +292,7 @@ class ModelConfigRecord(Base):
     max_tokens: Mapped[int] = mapped_column(Integer, default=2048, nullable=False)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=utcnow, nullable=False
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
     )
 
 

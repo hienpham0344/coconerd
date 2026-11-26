@@ -1,5 +1,6 @@
 """Passive model configuration persistence."""
 
+from datetime import UTC, datetime
 from uuid import uuid4
 
 from sqlalchemy import select
@@ -66,3 +67,4 @@ class ModelConfigRepository:
         record.model_id = config.model_id
         record.temperature = config.temperature
         record.max_tokens = config.max_tokens
+        record.updated_at = datetime.now(UTC)

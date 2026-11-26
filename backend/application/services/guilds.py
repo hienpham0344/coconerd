@@ -12,6 +12,10 @@ async def get_guild_settings(uow: UnitOfWork, guild_id: str) -> GuildSettings:
     return settings
 
 
+async def list_guild_settings(uow: UnitOfWork) -> list[GuildSettings]:
+    return list(await uow.guilds.list_settings())
+
+
 async def set_guild_settings(
     uow: UnitOfWork,
     guild_id: str,

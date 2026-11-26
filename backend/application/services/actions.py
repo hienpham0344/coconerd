@@ -73,12 +73,8 @@ async def complete_action(
                 or topic.discord_thread_id != previous_discord_thread_id
             ):
                 raise Conflict("Thread relocation does not match current mapping or Output Channel")
-        elif (
-            action.action_type == "CREATE_THREAD"
-            and topic.discord_thread_id
-            and topic.discord_thread_id != discord_thread_id
-        ):
-            raise Conflict("Topic is already mapped to another Discord thread")
+        elif topic.discord_thread_id and topic.discord_thread_id != discord_thread_id:
+            raise Conflict("Discord thread ID is already assigned to another topic")
     changed = await uow.actions.update_leased(
         action.id,
         worker_id,
@@ -92,14 +88,22 @@ async def complete_action(
     )
     if not changed:
         raise Conflict("Action lease was lost")
-    if relocate:
-        if not await uow.topics.replace_thread(
-            action.guild_id, action.topic_id, previous_discord_thread_id, discord_thread_id
-        ):
-            raise Conflict("Topic thread mapping changed concurrently")
-    elif action.action_type == "CREATE_THREAD":
-        await uow.topics.set_thread(action.guild_id, action.topic_id, discord_thread_id)
-    await uow.commit()
+    try:
+        if relocate:
+            if not await uow.topics.replace_thread(
+                action.guild_id, action.topic_id, previous_discord_thread_id, discord_thread_id
+            ):
+                raise Conflict("Topic thread mapping changed concurrently")
+        elif action.action_type == "CREATE_THREAD" and discord_thread_id:
+            await uow.topics.set_thread(action.guild_id, action.topic_id, discord_thread_id)
+        await uow.commit()
+    except Exception as exc:
+        await uow.rollback()
+        if isinstance(exc, Conflict):
+            raise
+        if "UNIQUE" in str(exc).upper() or "duplicate" in str(exc).lower():
+            raise Conflict("Discord thread ID is already assigned to another topic") from exc
+        raise
     return ActionResult(action.id, "SUCCEEDED")
 
 
@@ -114,6 +118,14 @@ async def fail_action(
     lease_token: str | None = None,
 ) -> ActionResult:
     action = await _get_action(uow, action_id)
+    if (
+        action.status in {"PENDING", "DEAD"}
+        and action.lease_owner is None
+        and action.error_type is not None
+        and action.error_type == error_type
+        and action.lease_token == lease_token
+    ):
+        return ActionResult(action.id, action.status)
     _require_lease(action, worker_id, lease_token)
     status = "PENDING" if retryable and action.attempt_count < action.max_attempts else "DEAD"
     changes: dict[str, object] = dict(
