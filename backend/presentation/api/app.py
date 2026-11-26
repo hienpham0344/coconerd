@@ -33,7 +33,12 @@ from backend.presentation.api.routers import (
     reviews,
     topics,
 )
-from backend.presentation.api.security import admin_key_dependency, bot_key_dependency
+from backend.presentation.api.security import (
+    admin_key_dependency,
+    bot_key_dependency,
+    bot_or_admin_key_dependency,
+    failed_auth_limiter,
+)
 
 
 def create_app(
@@ -43,6 +48,7 @@ def create_app(
     app_settings = settings or get_settings()
     factory = session_factory or create_session_factory(app_settings)
     action_signal = WakeupSignal()
+    failed_auth_limiter.reset()
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
@@ -80,7 +86,8 @@ def create_app(
             CORSMiddleware,
             allow_origins=app_settings.cors_origins,
             allow_methods=["GET", "POST", "PUT", "DELETE"],
-            allow_headers=["X-API-Key", "X-Admin-API-Key", "Content-Type"],
+            allow_headers=["X-API-Key", "X-Admin-API-Key", "X-Request-ID", "Content-Type"],
+            expose_headers=["X-Request-ID", "Retry-After"],
         )
 
     app.add_middleware(RequestBoundaryMiddleware, max_request_bytes=app_settings.max_request_bytes)
@@ -91,10 +98,17 @@ def create_app(
 
     bot_auth = bot_key_dependency(app_settings.bot_api_key)
     admin_auth = admin_key_dependency(app_settings.admin_api_key)
+    bot_or_admin_auth = bot_or_admin_key_dependency(
+        app_settings.bot_api_key, app_settings.admin_api_key
+    )
     bot_dependencies = [Depends(bot_auth), Depends(rate_limit_dependency(factory, 120))]
     admin_dependencies = [
         Depends(admin_auth),
         Depends(rate_limit_dependency(factory, 60, "X-Admin-API-Key")),
+    ]
+    bot_or_admin_dependencies = [
+        Depends(bot_or_admin_auth),
+        Depends(rate_limit_dependency(factory, 120, "X-API-Key", "X-Admin-API-Key", 60)),
     ]
 
     dependencies = ApiDependencies(
@@ -106,6 +120,7 @@ def create_app(
         admin_auth,
         [Depends(bot_auth), Depends(rate_limit_dependency(factory, 600, "X-API-Key", "delivery"))],
         action_signal,
+        bot_or_admin_dependencies,
     )
     for module in (
         health,

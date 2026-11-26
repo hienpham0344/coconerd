@@ -4,12 +4,8 @@ from fastapi import APIRouter, Depends, Query
 
 from backend.application.ports.persistence import UnitOfWork
 from backend.application.review_contracts import CorrectMessage, RecoverAction, ResumeTopicSync
+from backend.application.services import review_operations
 from backend.application.services.message_review import correct_message, review_message
-from backend.application.services.review_operations import (
-    recover_action,
-    resume_topic_sync,
-    topic_sync_state,
-)
 from backend.presentation.api.dependencies import ApiDependencies
 
 
@@ -17,6 +13,14 @@ def create_router(dependencies: ApiDependencies) -> APIRouter:
     router = APIRouter(
         prefix="/api/v1/guilds/{guild_id}", tags=["review"], dependencies=dependencies.admin
     )
+
+    @router.get("/reviews", include_in_schema=False)
+    async def list_reviews(
+        guild_id: str,
+        limit: int = Query(default=50, ge=1, le=100),
+        uow: UnitOfWork = Depends(dependencies.get_uow),
+    ) -> dict:
+        return await review_operations.list_guild_review_queue(uow, guild_id, limit=limit)
 
     @router.get("/messages/{message_id}/review")
     async def get_review(
@@ -41,16 +45,17 @@ def create_router(dependencies: ApiDependencies) -> APIRouter:
         offset: int = Query(default=0, ge=0),
         uow: UnitOfWork = Depends(dependencies.get_uow),
     ) -> dict:
-        return await topic_sync_state(uow, guild_id, topic_id, limit, offset)
+        return await review_operations.topic_sync_state(uow, guild_id, topic_id, limit, offset)
 
     @router.post("/topics/{topic_id}/resume-sync")
+    @router.post("/topics/{topic_id}/sync-mode", include_in_schema=False)
     async def resume_sync(
         guild_id: str,
         topic_id: str,
         body: ResumeTopicSync,
         uow: UnitOfWork = Depends(dependencies.get_uow),
     ) -> dict:
-        return await resume_topic_sync(uow, guild_id, topic_id, body)
+        return await review_operations.resume_topic_sync(uow, guild_id, topic_id, body)
 
     @router.post("/actions/{action_id}/recover")
     async def recover(
@@ -59,6 +64,6 @@ def create_router(dependencies: ApiDependencies) -> APIRouter:
         body: RecoverAction,
         uow: UnitOfWork = Depends(dependencies.get_uow),
     ) -> dict:
-        return await recover_action(uow, guild_id, action_id, body)
+        return await review_operations.recover_action(uow, guild_id, action_id, body)
 
     return router

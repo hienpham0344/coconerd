@@ -1,18 +1,27 @@
 import asyncio
 import os
+import sys
+import warnings
 from collections.abc import AsyncIterator
+from pathlib import Path
 from uuid import uuid4
 
-import asyncpg
-import pytest
-import pytest_asyncio
-from httpx import ASGITransport, AsyncClient
-from sqlalchemy.engine import make_url
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
-from backend.config import Settings
-from backend.infrastructure.database.models import Base
-from backend.presentation.api.app import create_app
+import asyncpg  # noqa: E402
+import pytest  # noqa: E402
+import pytest_asyncio  # noqa: E402
+from httpx import ASGITransport, AsyncClient  # noqa: E402
+from sqlalchemy.engine import make_url  # noqa: E402
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine  # noqa: E402
+
+from backend.config import Settings  # noqa: E402
+from backend.infrastructure.database.models import Base  # noqa: E402
+from backend.presentation.api.app import create_app  # noqa: E402
+
+warnings.filterwarnings("ignore", message="'audioop' is deprecated", category=DeprecationWarning)
 
 
 @pytest.fixture(autouse=True)

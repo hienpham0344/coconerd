@@ -27,8 +27,6 @@ def create_router(dependencies: ApiDependencies) -> APIRouter:
     ) -> MessageIngestResponse:
         if len(body.content) > dependencies.settings.max_message_length:
             raise HTTPException(status_code=422, detail="Message content exceeds configured limit")
-        if len(body.content.encode("utf-8")) > dependencies.settings.max_request_bytes:
-            raise HTTPException(status_code=413, detail="Message payload exceeds request limit")
         message = ConversationMessage(
             guild_id=body.guild_id,
             channel_id=body.channel_id,

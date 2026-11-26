@@ -8,8 +8,28 @@ from backend.application.services import topics
 from backend.presentation.api.dependencies import ApiDependencies
 
 
+def _serialize_topic(topic: Any) -> dict[str, Any]:
+    if isinstance(topic, dict):
+        return topic
+    return {
+        "topic_id": topic.id,
+        "guild_id": topic.guild_id,
+        "channel_id": getattr(topic, "channel_id", None),
+        "title": topic.title,
+        "description": topic.description,
+        "status": topic.status,
+        "version": getattr(topic, "version", 1),
+        "sync_paused": getattr(topic, "sync_paused", False),
+        "discord_thread_id": topic.discord_thread_id,
+        "last_activity": topic.last_activity_at,
+    }
+
+
 def create_router(dependencies: ApiDependencies) -> APIRouter:
     router = APIRouter()
+    read_dependencies = (
+        dependencies.bot_or_admin if dependencies.bot_or_admin is not None else dependencies.bot
+    )
 
     @router.get("/api/v1/threads/{thread_id}/topic", tags=["topics"], dependencies=dependencies.bot)
     async def get_thread_topic(
@@ -53,9 +73,37 @@ def create_router(dependencies: ApiDependencies) -> APIRouter:
         }
 
     @router.get(
+        "/api/v1/guilds/{guild_id}/topics",
+        tags=["topics"],
+        dependencies=read_dependencies,
+        include_in_schema=False,
+    )
+    async def list_guild_topics(
+        guild_id: str,
+        status: str | None = Query(default=None, max_length=50),
+        q: str | None = Query(default=None, max_length=200),
+        limit: int = Query(default=50, ge=1, le=100),
+        offset: int = Query(default=0, ge=0),
+        uow: UnitOfWork = Depends(dependencies.get_uow),
+    ) -> dict[str, Any]:
+        items = await topics.list_guild_topics(
+            uow,
+            guild_id,
+            status=status,
+            query=q,
+            limit=limit,
+            offset=offset,
+        )
+        return {
+            "items": [_serialize_topic(item) for item in items],
+            "limit": limit,
+            "offset": offset,
+        }
+
+    @router.get(
         "/api/v1/topics/{topic_id}",
         tags=["topics"],
-        dependencies=dependencies.bot,
+        dependencies=read_dependencies,
     )
     async def get_topic(
         topic_id: str,
@@ -63,20 +111,12 @@ def create_router(dependencies: ApiDependencies) -> APIRouter:
         uow: UnitOfWork = Depends(dependencies.get_uow),
     ) -> dict[str, Any]:
         topic = await topics.get_topic(uow, guild_id, topic_id)
-        return {
-            "topic_id": topic.id,
-            "guild_id": topic.guild_id,
-            "title": topic.title,
-            "description": topic.description,
-            "status": topic.status,
-            "discord_thread_id": topic.discord_thread_id,
-            "last_activity": topic.last_activity_at,
-        }
+        return _serialize_topic(topic)
 
     @router.get(
         "/api/v1/topics/{topic_id}/messages",
         tags=["topics"],
-        dependencies=dependencies.bot,
+        dependencies=read_dependencies,
     )
     async def get_topic_messages(
         topic_id: str,
@@ -106,7 +146,7 @@ def create_router(dependencies: ApiDependencies) -> APIRouter:
     @router.get(
         "/api/v1/topics/{topic_id}/summary",
         tags=["topics"],
-        dependencies=dependencies.bot,
+        dependencies=read_dependencies,
     )
     async def get_topic_summary(
         topic_id: str,
@@ -141,7 +181,7 @@ def create_router(dependencies: ApiDependencies) -> APIRouter:
     @router.delete(
         "/api/v1/admin/topics/{topic_id}",
         tags=["admin"],
-        dependencies=[Depends(dependencies.admin_auth)],
+        dependencies=dependencies.admin,
     )
     async def delete_topic(
         topic_id: str,

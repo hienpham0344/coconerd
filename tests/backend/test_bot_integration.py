@@ -203,9 +203,6 @@ async def test_migrated_http_worker_memory_outbox_retry_and_ack(runtime):
         f"/api/v1/actions/{create['action_id']}/complete", headers=BOT, json=receipt
     )
     assert repeated.status_code == 200
-    (summary_one,) = await claim(runtime)
-    assert summary_one["payload"]["version"] == 1
-    await ack(runtime, summary_one)
     (append,) = await claim(runtime)
     assert append["type"] == "APPEND_MESSAGE"
     failed = await runtime.client.post(

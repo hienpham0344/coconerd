@@ -62,10 +62,15 @@ def create_router(repository, dependencies):
     async def save_credential(kind: Kind, key: Key, body: CredentialBody, repo=Depends(repository)):
         now = datetime.now(UTC)
         ttl = timedelta(hours=12) if kind == "session" else timedelta(minutes=5)
-        if body.expires_at.tzinfo is None or not now < body.expires_at <= now + ttl:
+        if (
+            body.expires_at.tzinfo is None
+            or body.expires_at.utcoffset() is None
+            or not now < body.expires_at <= now + ttl
+        ):
             raise HTTPException(422, "Invalid credential expiry")
+        expires_at = body.expires_at.astimezone(UTC)
         if not await repo.save_credential(
-            kind, key, body.payload, body.expires_at, body.expected_payload
+            kind, key, body.payload, expires_at, body.expected_payload
         ):
             raise HTTPException(409, "Credential changed or revoked")
         return {"status": "saved"}

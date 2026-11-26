@@ -19,3 +19,4 @@ class ApiDependencies:
     admin_auth: Callable[..., Any]
     delivery: list[Any]
     action_notifications: Notifications
+    bot_or_admin: list[Any] | None = None

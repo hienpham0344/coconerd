@@ -3,6 +3,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator, model_validator
 
+from backend.config import get_settings
+
 
 class DeliveryReceiptResponse(BaseModel):
     discord_id: str = Field(min_length=1, max_length=100)
@@ -23,7 +25,7 @@ class MessageIngestRequest(BaseModel):
     message_id: str = Field(min_length=1, max_length=100)
     author_id: str = Field(min_length=1, max_length=100)
     author_name: str = Field(min_length=1, max_length=200)
-    content: str = Field(max_length=8000)
+    content: str = Field(max_length=get_settings().max_message_length)
     created_at: datetime
     reply_to_message_id: str | None = Field(default=None, max_length=100)
     attachments: list[MessageAttachment] = Field(default_factory=list, max_length=10)
@@ -74,6 +76,8 @@ class ActionResponse(BaseModel):
     channel_id: str
     payload: dict[str, Any]
     status: str
+    discord_thread_id: str | None = None
+    discord_summary_message_id: str | None = None
 
 
 class GuildSettingsRequest(BaseModel):

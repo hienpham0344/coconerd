@@ -41,6 +41,8 @@ def create_router(dependencies: ApiDependencies) -> APIRouter:
                 payload=action.payload,
                 status=action.status,
                 lease_token=action.lease_token,
+                discord_thread_id=getattr(action, "discord_thread_id", None),
+                discord_summary_message_id=getattr(action, "discord_summary_message_id", None),
             )
             for action in claimed
         ]

@@ -73,6 +73,7 @@ async def test_completion_failure_rolls_back_staged_classification(monkeypatch):
             version=1,
             discord_thread_id=None,
             sync_paused=False,
+            last_activity_at=created_at,
         )
 
     async def stage_episode(*_args):

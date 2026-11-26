@@ -17,8 +17,12 @@ def create_router(dependencies: ApiDependencies) -> APIRouter:
     @router.websocket("/api/v1/actions/events")
     async def action_events(socket: WebSocket) -> None:
         try:
+            client_host = socket.client.host if socket.client else "global"
             verify_key(
-                dependencies.settings.bot_api_key, socket.headers.get("X-API-Key"), "Bot API"
+                dependencies.settings.bot_api_key,
+                socket.headers.get("X-API-Key"),
+                "Bot API",
+                client_key=client_host,
             )
         except HTTPException:
             await socket.close(code=status.WS_1008_POLICY_VIOLATION)

@@ -1,4 +1,5 @@
 from datetime import UTC, datetime, timedelta
+from unittest.mock import patch
 
 import pytest
 
@@ -95,6 +96,8 @@ async def test_uow_message_ingest_and_list_return_plain_read_models():
 async def test_uow_claims_return_plain_action_and_job_read_models():
     from backend.application.read_models import ClaimedAction, ClaimedJob
 
+    known_token = "deadbeefcafe12345678901234567890"
+
     action = DiscordActionRecord(
         id="a1",
         guild_id="g1",
@@ -103,6 +106,7 @@ async def test_uow_claims_return_plain_action_and_job_read_models():
         action_type=ActionType.CREATE_THREAD.value,
         status=ActionStatus.CLAIMED.value,
         payload={"title": "Topic"},
+        lease_token=known_token,
     )
     job = ProcessingJobRecord(
         id="j1",
@@ -110,12 +114,20 @@ async def test_uow_claims_return_plain_action_and_job_read_models():
         message_record_id="m1",
         status=JobStatus.CLAIMED.value,
     )
-    action_session = SessionSpy(scalar_values=(None,), scalar_rows=(("a1",), (action,)))
+
+    class _FakeUUID:
+        hex = known_token
+
+    action_session = SessionSpy(scalar_values=(None,), scalar_rows=(("a1",), (action,), (), ()))
     action_uow = SqlAlchemyUnitOfWork(action_session)
     now = datetime.now(UTC)
-    actions = await action_uow.actions.claim_available(
-        "worker", 1, now, now + timedelta(seconds=30)
-    )
+    with patch(
+        "backend.infrastructure.database.repositories.actions.uuid4",
+        return_value=_FakeUUID(),
+    ):
+        actions = await action_uow.actions.claim_available(
+            "worker", 1, now, now + timedelta(seconds=30)
+        )
 
     job_session = SessionSpy(scalar_values=("j1",), get_result=job)
     job_uow = SqlAlchemyUnitOfWork(job_session)
