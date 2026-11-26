@@ -1,11 +1,12 @@
 """Discord Bot connection, personality interaction, Meta AI, and Backend API integration."""
 
 import asyncio
-from datetime import datetime, timezone
 import os
-from pathlib import Path
 import sys
 import time
+from contextlib import suppress
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
@@ -146,11 +147,11 @@ class BackendClient:
         self._action_leases: dict[str, str] = {}
 
     def _normalize_snowflake(self, snowflake_id: Any) -> str:
-        """Normalizes a Discord snowflake/identifier string safely stripping whitespace and slashes."""
+        """Normalizes a Discord snowflake/identifier string safely stripping slashes."""
         return str(snowflake_id).strip().strip("/")
 
     def _build_url(self, path: str) -> str:
-        """Safely joins base_url with path, ensuring single leading slash on path and no duplicate slashes."""
+        """Safely joins base_url with path, ensuring a single slash separator."""
         clean_base = str(self.base_url).rstrip("/")
         clean_path = path.lstrip("/")
         return f"{clean_base}/{clean_path}"
@@ -168,7 +169,9 @@ class BackendClient:
         if self._session and not self._session.closed:
             await self._session.close()
 
-    async def get_guild_settings(self, guild_id: str, force_refresh: bool = False) -> dict[str, Any]:
+    async def get_guild_settings(
+        self, guild_id: str, force_refresh: bool = False
+    ) -> dict[str, Any]:
         clean_guild_id = self._normalize_snowflake(guild_id)
         now = time.monotonic()
         if not force_refresh and clean_guild_id in self._settings_cache:
@@ -182,7 +185,7 @@ class BackendClient:
             async with session.get(url) as resp:
                 if resp.status == 200:
                     data = await resp.json()
-                    self._settings_cache[clean_guild_id] = (now, data)
+                    self._settings_cache[clean_guild_id] = (time.monotonic(), data)
                     return data
                 if resp.status == 404:
                     default_settings = {
@@ -192,12 +195,13 @@ class BackendClient:
                         "output_channel_id": None,
                         "retention_days": 365,
                     }
-                    self._settings_cache[clean_guild_id] = (now, default_settings)
+                    self._settings_cache[clean_guild_id] = (time.monotonic(), default_settings)
                     return default_settings
-        except Exception as exc:
-            # If backend is temporarily unreachable, return cached or disabled fallback
-            if clean_guild_id in self._settings_cache:
-                return self._settings_cache[clean_guild_id][1]
+        except Exception:
+            pass
+        # If backend is temporarily unreachable or rate-limited, return cached or disabled fallback
+        if clean_guild_id in self._settings_cache:
+            return self._settings_cache[clean_guild_id][1]
         return {
             "guild_id": clean_guild_id,
             "enabled": False,
@@ -227,7 +231,7 @@ class BackendClient:
         # Resolve Admin API key
         admin_key = self.admin_api_key or get_admin_api_key()
 
-        # Build list of candidate endpoints: prefer Admin endpoint with X-Admin-API-Key, fallback to Bot endpoint
+        # Prefer Admin endpoint with X-Admin-API-Key, fallback to Bot endpoint
         endpoints: list[tuple[str, dict[str, str], str]] = []
         if admin_key:
             endpoints.append(
@@ -238,7 +242,10 @@ class BackendClient:
                 )
             )
         else:
-            print("⚠️ [SETTINGS] COCONERD_ADMIN_API_KEY is not configured; attempting save with Bot API key.")
+            print(
+                "⚠️ [SETTINGS] COCONERD_ADMIN_API_KEY is not configured; "
+                "attempting save with Bot API key."
+            )
 
         endpoints.append(
             (
@@ -251,7 +258,10 @@ class BackendClient:
         last_status = None
         for url, headers, endpoint_label in endpoints:
             try:
-                print(f"ℹ️ [SETTINGS] Requesting save to {endpoint_label} at {url} (channels={len(allowed_channel_ids)}, retention={retention_days})")
+                print(
+                    f"ℹ️ [SETTINGS] Requesting save to {endpoint_label} at {url} "
+                    f"(channels={len(allowed_channel_ids)}, retention={retention_days})"
+                )
                 async with session.put(url, json=payload, headers=headers) as resp:
                     last_status = resp.status
                     if resp.status == 200:
@@ -259,33 +269,64 @@ class BackendClient:
                         now = time.monotonic()
                         self._settings_cache[clean_guild_id] = (now, data)
                         self.last_error = None
-                        print(f"✅ [SETTINGS] Guild settings for '{clean_guild_id}' saved successfully via {endpoint_label}.")
+                        print(
+                            f"✅ [SETTINGS] Guild settings for '{clean_guild_id}' "
+                            f"saved successfully via {endpoint_label}."
+                        )
                         return data
                     elif resp.status == 404 and endpoint_label == "Admin API":
                         # If admin endpoint route not found, attempt next endpoint
-                        print(f"ℹ️ [SETTINGS] {endpoint_label} endpoint 404 Not Found at {url}, trying next endpoint...")
+                        print(
+                            f"ℹ️ [SETTINGS] {endpoint_label} endpoint 404 Not Found at {url}, "
+                            "trying next endpoint..."
+                        )
                         continue
                     else:
                         err_txt = await resp.text()
                         if resp.status == 401:
-                            self.last_error = f"Authentication failed with {endpoint_label} (invalid or missing API Key)"
-                            print(f"❌ [SETTINGS] Authentication failure (HTTP 401) on {endpoint_label}: {err_txt[:100]}")
+                            self.last_error = (
+                                f"Authentication failed with {endpoint_label} "
+                                "(invalid or missing API Key)"
+                            )
+                            print(
+                                f"❌ [SETTINGS] Authentication failure (HTTP 401) on "
+                                f"{endpoint_label}: {err_txt[:100]}"
+                            )
                         elif resp.status == 403:
                             self.last_error = f"Permission denied by {endpoint_label}"
-                            print(f"❌ [SETTINGS] Permission failure (HTTP 403) on {endpoint_label}: {err_txt[:100]}")
+                            print(
+                                f"❌ [SETTINGS] Permission failure (HTTP 403) on "
+                                f"{endpoint_label}: {err_txt[:100]}"
+                            )
                         elif resp.status == 422:
-                            self.last_error = "Validation error (invalid channel selection or settings format)"
-                            print(f"❌ [SETTINGS] Request validation failure (HTTP 422) on {endpoint_label}: {err_txt[:100]}")
+                            self.last_error = (
+                                "Validation error (invalid channel selection or settings format)"
+                            )
+                            print(
+                                f"❌ [SETTINGS] Request validation failure (HTTP 422) on "
+                                f"{endpoint_label}: {err_txt[:100]}"
+                            )
                         elif resp.status >= 500:
                             self.last_error = f"Backend server error (HTTP {resp.status})"
-                            print(f"❌ [SETTINGS] Backend server error (HTTP {resp.status}) on {endpoint_label}: {err_txt[:100]}")
+                            print(
+                                f"❌ [SETTINGS] Backend server error (HTTP {resp.status}) on "
+                                f"{endpoint_label}: {err_txt[:100]}"
+                            )
                         else:
                             self.last_error = f"Backend rejected request (HTTP {resp.status})"
-                            print(f"❌ [SETTINGS] Request rejected (HTTP {resp.status}) on {endpoint_label}: {err_txt[:100]}")
+                            print(
+                                f"❌ [SETTINGS] Request rejected (HTTP {resp.status}) on "
+                                f"{endpoint_label}: {err_txt[:100]}"
+                            )
                         return None
-            except (aiohttp.ClientConnectorError, asyncio.TimeoutError) as conn_exc:
-                self.last_error = "Could not connect to Backend API (connection refused or timeout)"
-                print(f"❌ [SETTINGS] Connection failure on {endpoint_label}: {type(conn_exc).__name__} - {conn_exc}")
+            except (aiohttp.ClientConnectorError, TimeoutError) as conn_exc:
+                self.last_error = (
+                    "Could not connect to Backend API (connection refused or timeout)"
+                )
+                print(
+                    f"❌ [SETTINGS] Connection failure on {endpoint_label}: "
+                    f"{type(conn_exc).__name__} - {conn_exc}"
+                )
                 return None
             except Exception as exc:
                 self.last_error = f"Unexpected client error: {type(exc).__name__}"
@@ -330,23 +371,29 @@ class BackendClient:
         if not message.guild:
             return False
 
-        created_iso = message.created_at.astimezone(timezone.utc).isoformat()
+        created_iso = message.created_at.astimezone(UTC).isoformat()
         reply_to = (
             str(message.reference.message_id)
             if message.reference and message.reference.message_id
             else None
         )
+        raw_author = (
+            getattr(message.author, "display_name", None)
+            or getattr(message.author, "name", None)
+            or "Member"
+        )
+        author_name = (str(raw_author).strip() or "Member")[:200]
 
         payload = {
             "guild_id": str(message.guild.id),
             "channel_id": str(message.channel.id),
             "message_id": str(message.id),
             "author_id": str(message.author.id),
-            "author_name": message.author.display_name,
+            "author_name": author_name,
             "content": message.content,
             "created_at": created_iso,
             "reply_to_message_id": reply_to,
-            "attachments": attachment_payloads(message),
+            "attachments": attachment_payloads(message)[:10],
         }
 
         session = await self.get_session()
@@ -372,10 +419,10 @@ class BackendClient:
             async with session.post(url, json={"worker_id": worker_id, "limit": limit}) as resp:
                 if resp.status == 200:
                     actions = await resp.json()
-                    self._action_leases = {
-                        str(action["action_id"]): action["lease_token"]
-                        for action in actions if action.get("lease_token")
-                    }
+                    for action in actions:
+                        if action.get("action_id") and action.get("lease_token"):
+                            clean_id = str(action["action_id"]).strip().strip("/")
+                            self._action_leases[clean_id] = action["lease_token"]
                     return actions
         except Exception:
             pass
@@ -423,10 +470,12 @@ class BackendClient:
         session = await self.get_session()
         clean_action_id = str(action_id).strip().strip("/")
         url = self._build_url(f"api/v1/actions/{clean_action_id}/fail")
+        clean_error_type = (str(error_type).strip() or "DeliveryError")[:100]
+        clean_error_message = (str(error_message).strip() or clean_error_type)[:900]
         payload = {
             "worker_id": worker_id,
-            "error_type": error_type,
-            "error_message": error_message[:900],
+            "error_type": clean_error_type,
+            "error_message": clean_error_message,
             "retryable": retryable,
             "lease_token": self._action_leases.get(clean_action_id),
         }
@@ -562,10 +611,14 @@ class SetupConfigView(discord.ui.View):
         }
 
         raw_allowed = current_settings.get("allowed_channel_ids") or []
-        self.selected_input_ids: list[str] = [cid for cid in raw_allowed if cid in guild_channel_ids]
+        self.selected_input_ids: list[str] = [
+            cid for cid in raw_allowed if cid in guild_channel_ids
+        ]
 
         raw_output = current_settings.get("output_channel_id")
-        self.selected_output_id: str | None = raw_output if raw_output in guild_channel_ids else None
+        self.selected_output_id: str | None = (
+            raw_output if raw_output in guild_channel_ids else None
+        )
         self.retention_days: int = current_settings.get("retention_days", 365)
 
         # 1. Input Channels Select Menu (up to 25 default selections)
@@ -630,7 +683,10 @@ class SetupConfigView(discord.ui.View):
     def build_embed(self) -> discord.Embed:
         embed = discord.Embed(
             title=f"🥥 Coconerd Setup — {self.guild.name}",
-            description="Configure Input Channels for Coconerd to monitor and one Output Channel for summaries.",
+            description=(
+                "Configure Input Channels for Coconerd to monitor "
+                "and one Output Channel for summaries."
+            ),
             color=0x38BDF8,
         )
 
@@ -640,7 +696,10 @@ class SetupConfigView(discord.ui.View):
             if len(in_mentions) <= 15:
                 in_desc = ", ".join(in_mentions)
             else:
-                in_desc = ", ".join(in_mentions[:15]) + f" *(+{len(in_mentions) - 15} more)*"
+                in_desc = (
+                    ", ".join(in_mentions[:15])
+                    + f" *(+{len(in_mentions) - 15} more)*"
+                )
         else:
             in_desc = "*(No channels selected — bot will not read messages)*"
 
@@ -674,7 +733,10 @@ class SetupConfigView(discord.ui.View):
         )
 
         embed.set_footer(
-            text="Select channels from the dropdowns below, then click 'Save Configuration' • Session expires in 5 minutes"
+            text=(
+                "Select channels from the dropdowns below, then click 'Save Configuration' "
+                "• Session expires in 5 minutes"
+            )
         )
         return embed
 
@@ -737,25 +799,25 @@ class SetupConfigView(discord.ui.View):
 
     async def on_cancel(self, interaction: discord.Interaction) -> None:
         self.stop()
-        try:
+        with suppress(discord.NotFound):
             await interaction.response.send_message(
                 "❌ Setup session cancelled. Configuration unchanged.", ephemeral=True
             )
-        except discord.NotFound:
-            pass
         if self.message:
             try:
                 await interaction.delete_original_response()
             except Exception:
-                try:
+                with suppress(Exception):
                     await interaction.edit_original_response(
                         content="❌ Setup cancelled.", embed=None, view=None
                     )
-                except Exception:
-                    pass
 
     async def on_save(self, interaction: discord.Interaction) -> None:
         # Validate output channel
+        bot_user = getattr(self.bot, "user", None)
+        bot_member = self.guild.me or (
+            self.guild.get_member(bot_user.id) if bot_user is not None else None
+        )
         target_output_channel = None
         if self.selected_output_id:
             target_output_channel = self.guild.get_channel(int(self.selected_output_id))
@@ -766,19 +828,18 @@ class SetupConfigView(discord.ui.View):
                 )
                 return
 
-            bot_member = self.guild.me or self.guild.get_member(self.bot.user.id)
             if bot_member:
                 perms = target_output_channel.permissions_for(bot_member)
                 if not perms.send_messages:
                     await interaction.response.send_message(
-                        f"❌ Bot lacks **Send Messages** permission in {target_output_channel.mention}. "
-                        f"Please grant the permission to the bot or select another Output Channel.",
+                        f"❌ Bot lacks **Send Messages** permission in "
+                        f"{target_output_channel.mention}. "
+                        "Please grant the permission to the bot or select another Output Channel.",
                         ephemeral=True,
                     )
                     return
 
         # Validate input channels
-        bot_member = self.guild.me or self.guild.get_member(self.bot.user.id)
         unreadable_channels = []
         if bot_member:
             for cid in self.selected_input_ids:
@@ -792,7 +853,8 @@ class SetupConfigView(discord.ui.View):
         if unreadable_channels:
             warning_msg = (
                 f"⚠️ **Permission Notice:** Bot lacks read permissions in: "
-                f"{', '.join(unreadable_channels)}. Messages in these channels cannot be processed until permissions are granted."
+                f"{', '.join(unreadable_channels)}. Messages in these channels cannot be "
+                "processed until permissions are granted."
             )
 
         # Defer before backend request
@@ -838,13 +900,18 @@ class SetupConfigView(discord.ui.View):
             if self.selected_input_ids
             else "*(None — bot will not read messages)*"
         )
-        out_text = f"<#{self.selected_output_id}>" if self.selected_output_id else "*(Not configured)*"
+        out_text = (
+            f"<#{self.selected_output_id}>" if self.selected_output_id else "*(Not configured)*"
+        )
+        status_label = (
+            "🟢 Active" if is_enabled else "⏸️ Inactive (no Input Channels selected)"
+        )
 
         success_msg = (
             f"🥥 **CONFIGURATION SAVED SUCCESSFULLY FOR {self.guild.name}!**\n\n"
             f"📥 **Input Channels ({len(self.selected_input_ids)}):** {in_text}\n"
             f"📤 **Output Channel:** {out_text}\n"
-            f"⚙️ **Status:** {'🟢 Active' if is_enabled else '⏸️ Inactive (no Input Channels selected)'}\n"
+            f"⚙️ **Status:** {status_label}\n"
         )
         if warning_msg:
             success_msg += f"\n{warning_msg}\n"
@@ -859,23 +926,19 @@ class SetupConfigView(discord.ui.View):
         try:
             await interaction.delete_original_response()
         except Exception:
-            try:
+            with suppress(Exception):
                 await interaction.edit_original_response(
                     content="✅ Setup complete.", embed=None, view=None
                 )
-            except Exception:
-                pass
 
     async def on_timeout(self) -> None:
         for child in self.children:
             child.disabled = True
         if self.message:
-            try:
+            with suppress(Exception):
                 embed = self.build_embed()
                 embed.set_footer(text="⌛ Setup session expired. Run /setup to open again.")
                 await self.message.edit(embed=embed, view=self)
-            except Exception:
-                pass
 
     async def on_error(
         self, interaction: discord.Interaction, error: Exception, item: discord.ui.Item[Any]
@@ -921,9 +984,10 @@ class TopicPaginationView(discord.ui.View):
 
     def build_embed(self) -> discord.Embed:
         embed = discord.Embed(
-            title=f"🥥 Discussion Topics — #{self.channel_name}",
+            title=f"🥥 Discussion Topics — #{self.channel_name}"[:256],
             description=(
-                "Topics currently monitored in this Input Channel, sorted by most recent activity.\n"
+                "Topics currently monitored in this Input Channel, "
+                "sorted by most recent activity.\n"
                 "Run `/summarize topic_id:<number>` to view a topic's summary."
             ),
             color=0x38BDF8,
@@ -936,15 +1000,21 @@ class TopicPaginationView(discord.ui.View):
         for i, t in enumerate(page_topics):
             idx = start_idx + i + 1
             title = t.get("title", "Untitled Topic")
-            status = t.get("status", "ACTIVE")
-            status_badge = "🟢 Active" if status == "ACTIVE" else "⏸️ Dormant"
+            status = str(t.get("status", "ACTIVE")).upper()
+            status_badge = "🟢 Active" if status in ("ACTIVE", "RESUMED") else "⏸️ Dormant"
             msg_count = t.get("message_count", 0)
 
-            last_act = t.get("last_activity")
+            last_act = t.get("last_activity") or t.get("last_activity_at")
             time_str = "N/A"
             if last_act:
                 try:
-                    dt = datetime.fromisoformat(last_act)
+                    dt = (
+                        last_act
+                        if isinstance(last_act, datetime)
+                        else datetime.fromisoformat(str(last_act))
+                    )
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=UTC)
                     time_str = f"<t:{int(dt.timestamp())}:R>"
                 except Exception:
                     time_str = str(last_act)[:19]
@@ -956,13 +1026,16 @@ class TopicPaginationView(discord.ui.View):
                 f"👉 **View summary:** `/summarize topic_id:{idx}`"
             )
             embed.add_field(
-                name=f"#{idx} — {title}",
+                name=f"#{idx} — {title}"[:256],
                 value=field_value,
                 inline=False,
             )
 
         embed.set_footer(
-            text=f"Page {self.page + 1}/{self.total_pages} • Total: {len(self.topics)} topics in #{self.channel_name}"
+            text=(
+                f"Page {self.page + 1}/{self.total_pages} • "
+                f"Total: {len(self.topics)} topics in #{self.channel_name}"
+            )
         )
         return embed
 
@@ -1005,10 +1078,8 @@ class TopicPaginationView(discord.ui.View):
             if isinstance(item, discord.ui.Button):
                 item.disabled = True
         if self.message:
-            try:
+            with suppress(Exception):
                 await self.message.edit(view=self)
-            except Exception:
-                pass
 
     async def on_error(
         self, interaction: discord.Interaction, error: Exception, item: discord.ui.Item[Any]
@@ -1034,15 +1105,18 @@ def build_topic_summary_embed(
     title = summary.get("title") or topic.get("title", "Untitled Topic")
     status = summary.get("status") or topic.get("status", "ACTIVE")
     status_str = str(status).upper()
-    status_badge = "🟢 Active" if status_str == "ACTIVE" else "⏸️ Dormant"
+    is_active = status_str in ("ACTIVE", "RESUMED")
+    status_badge = "🟢 Active" if is_active else "⏸️ Dormant"
     version = summary.get("version", 1)
     source_msg_ids = summary.get("source_message_ids") or []
     msg_count = topic.get("message_count", len(source_msg_ids))
 
     embed = discord.Embed(
-        title=f"🥥 #{index} — {title}",
-        description=f"**Status:** {status_badge} • **Version:** v{version} • **Messages:** {msg_count}",
-        color=0x22C55E if status_str == "ACTIVE" else 0x94A3B8,
+        title=f"🥥 #{index} — {title}"[:256],
+        description=(
+            f"**Status:** {status_badge} • **Version:** v{version} • **Messages:** {msg_count}"
+        ),
+        color=0x22C55E if is_active else 0x94A3B8,
     )
 
     th_id = topic.get("discord_thread_id")
@@ -1050,37 +1124,51 @@ def build_topic_summary_embed(
         embed.add_field(name="🧵 Discussion Thread", value=f"<#{th_id}>", inline=False)
 
     overview = summary.get("overview")
-    if overview:
-        embed.add_field(name="📖 Summary Overview", value=overview[:1024], inline=False)
+    if isinstance(overview, str) and overview.strip():
+        embed.add_field(name="📖 Summary Overview", value=overview.strip()[:1024], inline=False)
 
     proposals = summary.get("proposals")
     if proposals and isinstance(proposals, list):
-        p_text = "\n".join(f"• {p}" for p in proposals[:5])
+        valid_proposals = [str(p).strip() for p in proposals if isinstance(p, str) and p.strip()]
+        p_text = "\n".join(f"• {p}" for p in valid_proposals[:5])
         if p_text:
             embed.add_field(name="💡 Key Proposals", value=p_text[:1024], inline=False)
 
     decisions = summary.get("decisions")
     if decisions and isinstance(decisions, list):
-        d_text = "\n".join(f"• {d}" for d in decisions[:5])
+        valid_decisions = [str(d).strip() for d in decisions if isinstance(d, str) and d.strip()]
+        d_text = "\n".join(f"• {d}" for d in valid_decisions[:5])
         if d_text:
             embed.add_field(name="✅ Decisions Made", value=d_text[:1024], inline=False)
 
     action_items = summary.get("action_items")
     if action_items and isinstance(action_items, list):
-        a_text = "\n".join(f"• {a}" for a in action_items[:5])
+        valid_actions = [
+            str(a).strip() for a in action_items if isinstance(a, str) and a.strip()
+        ]
+        a_text = "\n".join(f"• {a}" for a in valid_actions[:5])
         if a_text:
             embed.add_field(name="📋 Action Items", value=a_text[:1024], inline=False)
 
     open_questions = summary.get("open_questions")
     if open_questions and isinstance(open_questions, list):
-        q_text = "\n".join(f"• {q}" for q in open_questions[:5])
+        valid_questions = [
+            str(q).strip() for q in open_questions if isinstance(q, str) and q.strip()
+        ]
+        q_text = "\n".join(f"• {q}" for q in valid_questions[:5])
         if q_text:
             embed.add_field(name="❓ Open Questions", value=q_text[:1024], inline=False)
 
-    last_act = topic.get("last_activity")
+    last_act = topic.get("last_activity") or topic.get("last_activity_at")
     if last_act:
         try:
-            dt = datetime.fromisoformat(last_act)
+            dt = (
+                last_act
+                if isinstance(last_act, datetime)
+                else datetime.fromisoformat(str(last_act))
+            )
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=UTC)
             embed.add_field(
                 name="🕒 Last Active",
                 value=f"<t:{int(dt.timestamp())}:R>",
@@ -1108,7 +1196,7 @@ DEFAULT_COMMAND_DESCRIPTIONS: dict[str, str] = {
 
 
 def get_command_descriptions(bot: commands.Bot) -> list[tuple[str, str]]:
-    """Dynamically retrieves registered slash commands from bot.tree with user-friendly descriptions."""
+    """Dynamically retrieves registered slash commands with user-friendly descriptions."""
     order = {"help": 1, "setup": 2, "summarize": 3, "ping": 4}
     results: dict[str, str] = {}
 
@@ -1177,7 +1265,7 @@ def find_welcome_channel(
 
 
 def build_help_embed(bot: commands.Bot) -> discord.Embed:
-    """Builds a structured help embed explaining Coconerd's workflow, channel architecture, and commands."""
+    """Builds a structured help embed explaining Coconerd's workflow and commands."""
     embed = discord.Embed(
         title="🥥 Coconerd — Help & Usage Guide",
         description=(
@@ -1213,8 +1301,8 @@ def build_help_embed(bot: commands.Bot) -> discord.Embed:
         name="🔒 Channel Isolation",
         value=(
             "Each Input Channel is processed completely independently. "
-            "Conversations from one channel are **never** mixed into or assigned to topics from another channel, "
-            "ensuring clarity and privacy."
+            "Conversations from one channel are **never** mixed into or assigned to topics "
+            "from another channel, ensuring clarity and privacy."
         ),
         inline=False,
     )
@@ -1230,7 +1318,8 @@ def build_help_embed(bot: commands.Bot) -> discord.Embed:
     embed.add_field(
         name="🚀 Getting Started",
         value=(
-            "A server administrator should run `/setup` to select Input Channels and the Output Channel. "
+            "A server administrator should run `/setup` to select Input Channels and the "
+            "Output Channel. "
             "Once configured, members can chat normally in the designated channels!"
         ),
         inline=False,
@@ -1262,7 +1351,8 @@ def build_welcome_embed(bot: commands.Bot, guild: discord.Guild) -> discord.Embe
             "1️⃣ **Initial Setup:** An administrator runs `/setup`.\n"
             "2️⃣ **Choose Input Channels:** Select the channels Coconerd is allowed to read.\n"
             "3️⃣ **Choose Output Channel:** Select one channel for topic titles and Threads.\n"
-            "4️⃣ **Chat Naturally:** Members chat normally in configured Input Channels, and Coconerd handles the rest!"
+            "4️⃣ **Chat Naturally:** Members chat normally in configured Input Channels, "
+            "and Coconerd handles the rest!"
         ),
         inline=False,
     )
@@ -1270,10 +1360,12 @@ def build_welcome_embed(bot: commands.Bot, guild: discord.Guild) -> discord.Embe
     embed.add_field(
         name="📥 Input Channels vs 📤 Output Channel",
         value=(
-            "• **Input Channels:** Coconerd **only reads** channels explicitly enabled in `/setup`. All other channels remain completely private.\n"
+            "• **Input Channels:** Coconerd **only reads** channels explicitly enabled in "
+            "`/setup`. All other channels remain completely private.\n"
             "• **Output Channel:** Topic titles and Threads containing member messages. "
             "Run `/summarize` inside a Thread when needed.\n"
-            "• **Channel Isolation:** Topics are handled independently per Input Channel and are never cross-pollinated."
+            "• **Channel Isolation:** Topics are handled independently per Input Channel "
+            "and are never cross-pollinated."
         ),
         inline=False,
     )
@@ -1288,7 +1380,10 @@ def build_welcome_embed(bot: commands.Bot, guild: discord.Guild) -> discord.Embe
 
     embed.add_field(
         name="❓ Need help later?",
-        value="Any server member can run `/help` at any time to view usage instructions and available commands.",
+        value=(
+            "Any server member can run `/help` at any time to view usage instructions "
+            "and available commands."
+        ),
         inline=False,
     )
 
@@ -1315,6 +1410,17 @@ def create_bot() -> commands.Bot:
     bot.dashboard_url = get_dashboard_url()
     bot.worker_id = f"coconerd-bot-{os.getpid()}"
     bot._action_wakeup = asyncio.Event()
+
+    original_close = bot.close
+
+    async def close_bot() -> None:
+        try:
+            if hasattr(bot.backend, "close"):
+                await bot.backend.close()
+        finally:
+            await original_close()
+
+    bot.close = close_bot
 
     user_cooldowns: dict[int, float] = {}
     cooldown_seconds = 10.0
@@ -1357,9 +1463,15 @@ def create_bot() -> commands.Bot:
                     missing.append("Embed Links")
 
                 if missing:
-                    print(f"⚠️ [PERMISSIONS] Máy chủ '{g.name}' ({g.id}) đang THIẾU quyền: {', '.join(missing)}")
+                    print(
+                        f"⚠️ [PERMISSIONS] Máy chủ '{g.name}' ({g.id}) đang THIẾU quyền: "
+                        f"{', '.join(missing)}"
+                    )
                 else:
-                    print(f"✅ [PERMISSIONS] Máy chủ '{g.name}' ({g.id}) đã có đầy đủ quyền tương tác.")
+                    print(
+                        f"✅ [PERMISSIONS] Máy chủ '{g.name}' ({g.id}) "
+                        "đã có đầy đủ quyền tương tác."
+                    )
 
         # Guild-scoped command synchronization for instant appearance
         for gid in target_guild_ids:
@@ -1368,10 +1480,18 @@ def create_bot() -> commands.Bot:
                 bot.tree.copy_global_to(guild=guild_obj)
                 synced = await bot.tree.sync(guild=guild_obj)
                 cmd_names = [f"/{c.name}" for c in synced]
-                guild_name = next((g.name for g in bot.guilds if g.id == gid), "Chưa cache tên Guild")
-                print(f"⚡ [GUILD SYNC] Đã đồng bộ tức thì {len(synced)} Slash Commands {cmd_names} tới Guild '{guild_name}' ({gid}).")
+                guild_name = next(
+                    (g.name for g in bot.guilds if g.id == gid), "Chưa cache tên Guild"
+                )
+                print(
+                    f"⚡ [GUILD SYNC] Đã đồng bộ tức thì {len(synced)} Slash Commands "
+                    f"{cmd_names} tới Guild '{guild_name}' ({gid})."
+                )
             except discord.errors.Forbidden as exc:
-                print(f"❌ [GUILD SYNC] Không có quyền đồng bộ vào Guild {gid} (403 Forbidden): {exc}")
+                print(
+                    f"❌ [GUILD SYNC] Không có quyền đồng bộ vào Guild {gid} "
+                    f"(403 Forbidden): {exc}"
+                )
             except Exception as exc:
                 print(f"⚠️ [GUILD SYNC] Lỗi đồng bộ vào Guild {gid}: {type(exc).__name__} - {exc}")
 
@@ -1379,7 +1499,10 @@ def create_bot() -> commands.Bot:
         try:
             bot.tree.clear_commands(guild=None)
             await bot.tree.sync(guild=None)
-            print("🧹 [GLOBAL CLEANUP] Đã xóa Global Commands để tránh trùng lặp lệnh khi Discord cache cập nhật.")
+            print(
+                "🧹 [GLOBAL CLEANUP] Đã xóa Global Commands để tránh trùng lặp lệnh "
+                "khi Discord cache cập nhật."
+            )
         except Exception as exc:
             print(f"⚠️ [GLOBAL CLEANUP] Không thể dọn dẹp Global Commands: {exc}")
 
@@ -1448,7 +1571,10 @@ def create_bot() -> commands.Bot:
             guild_obj = discord.Object(id=guild.id)
             bot.tree.copy_global_to(guild=guild_obj)
             synced = await bot.tree.sync(guild=guild_obj)
-            print(f"⚡ [GUILD JOIN] Đã đồng bộ tức thì {len(synced)} Slash Commands cho máy chủ '{guild.name}' ({guild.id}).")
+            print(
+                f"⚡ [GUILD JOIN] Đã đồng bộ tức thì {len(synced)} Slash Commands "
+                f"cho máy chủ '{guild.name}' ({guild.id})."
+            )
         except Exception as exc:
             print(f"⚠️ [GUILD JOIN] Không thể đồng bộ slash commands cho '{guild.name}': {exc}")
 
@@ -1456,7 +1582,8 @@ def create_bot() -> commands.Bot:
         target_channel = find_welcome_channel(guild, bot.user)
         if target_channel is None:
             print(
-                f"⚠️ [GUILD JOIN] Không tìm thấy kênh phù hợp (thiếu quyền Send Messages / Embed Links) trên '{guild.name}' ({guild.id})."
+                f"⚠️ [GUILD JOIN] Không tìm thấy kênh phù hợp (thiếu quyền Send Messages / "
+                f"Embed Links) trên '{guild.name}' ({guild.id})."
             )
             return
 
@@ -1464,11 +1591,20 @@ def create_bot() -> commands.Bot:
         try:
             embed = build_welcome_embed(bot, guild)
             await target_channel.send(embed=embed)
-            print(f"✅ [GUILD JOIN] Đã gửi thông điệp chào mừng tới #{target_channel.name} trên '{guild.name}'.")
+            print(
+                f"✅ [GUILD JOIN] Đã gửi thông điệp chào mừng tới #{target_channel.name} "
+                f"trên '{guild.name}'."
+            )
         except discord.errors.Forbidden:
-            print(f"⚠️ [GUILD JOIN] Bị từ chối quyền gửi tin nhắn chào mừng vào #{target_channel.name} trên '{guild.name}'.")
+            print(
+                f"⚠️ [GUILD JOIN] Bị từ chối quyền gửi tin nhắn chào mừng vào "
+                f"#{target_channel.name} trên '{guild.name}'."
+            )
         except Exception as exc:
-            print(f"⚠️ [GUILD JOIN] Lỗi gửi tin nhắn chào mừng trên '{guild.name}': {type(exc).__name__} - {exc}")
+            print(
+                f"⚠️ [GUILD JOIN] Lỗi gửi tin nhắn chào mừng trên '{guild.name}': "
+                f"{type(exc).__name__} - {exc}"
+            )
 
     @bot.event
     async def on_message(message: discord.Message):
@@ -1481,12 +1617,20 @@ def create_bot() -> commands.Bot:
         # ---------------------------------------------------------------------
         if bot.user and bot.user in message.mentions and not message.mention_everyone:
             now = time.monotonic()
+            if len(user_cooldowns) > 1000:
+                expired = [
+                    uid for uid, ts in user_cooldowns.items() if now - ts >= cooldown_seconds
+                ]
+                for uid in expired:
+                    user_cooldowns.pop(uid, None)
             last_time = user_cooldowns.get(message.author.id, 0.0)
             elapsed = now - last_time
 
             if elapsed < cooldown_seconds:
                 remaining = cooldown_seconds - elapsed
-                print(f"⏳ Cooldown: {message.author.name} tag Bot quá nhanh (còn {remaining:.1f}s)")
+                print(
+                    f"⏳ Cooldown: {message.author.name} tag Bot quá nhanh (còn {remaining:.1f}s)"
+                )
             else:
                 user_cooldowns[message.author.id] = now
                 clean_prompt = clean_mention_text(message.content, bot.user.id)
@@ -1534,22 +1678,28 @@ def create_bot() -> commands.Bot:
     # =========================================================================
     # Slash Commands
     # =========================================================================
-    @bot.tree.command(name="help", description="Show usage instructions, system workflow, and available commands")
+    @bot.tree.command(
+        name="help",
+        description="Show usage instructions, system workflow, and available commands",
+    )
     async def help_command(interaction: discord.Interaction):
         embed = build_help_embed(bot)
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
-    @bot.tree.command(name="setup", description="Configure Input Channels and Output Channel (Requires Manage Server permission)")
+    @bot.tree.command(
+        name="setup",
+        description=(
+            "Configure Input Channels and Output Channel (Requires Manage Server permission)"
+        ),
+    )
     @app_commands.default_permissions(manage_guild=True)
     async def setup_command(interaction: discord.Interaction):
         if not interaction.guild:
-            try:
+            with suppress(discord.NotFound):
                 await interaction.response.send_message(
                     "❌ The `/setup` command can only be used within a server.",
                     ephemeral=True,
                 )
-            except discord.NotFound:
-                pass
             return
 
         user_perms = interaction.permissions
@@ -1568,13 +1718,12 @@ def create_bot() -> commands.Bot:
             has_manage_guild = True
 
         if not has_manage_guild:
-            try:
+            with suppress(discord.NotFound):
                 await interaction.response.send_message(
-                    "❌ You don't have permission to use this command. Only administrators with Manage Server permission can use `/setup`.",
+                    "❌ You don't have permission to use this command. "
+                    "Only administrators with Manage Server permission can use `/setup`.",
                     ephemeral=True,
                 )
-            except discord.NotFound:
-                pass
             return
 
         try:
@@ -1690,7 +1839,8 @@ def create_bot() -> commands.Bot:
 
         if topic_id < 0:
             await interaction.followup.send(
-                "❌ `topic_id` must be 0 (to list topics) or a positive integer (to view a summary).",
+                "❌ `topic_id` must be 0 (to list topics) or a positive integer "
+                "(to view a summary).",
                 ephemeral=True,
             )
             return
@@ -1765,11 +1915,15 @@ def create_bot() -> commands.Bot:
                     "overview": "\n".join(overview_lines),
                     "status": selected_topic.get("status", "ACTIVE"),
                     "version": 1,
-                    "source_message_ids": [m.get("message_id") for m in topic_messages if m.get("message_id")],
+                    "source_message_ids": [
+                        m.get("message_id") for m in topic_messages if m.get("message_id")
+                    ],
                 }
             else:
+                topic_title = selected_topic.get("title", "Untitled")
                 await interaction.followup.send(
-                    f"⚠️ Could not load summary or messages for topic `#{topic_id}` (`{selected_topic.get('title', 'Untitled')}`).",
+                    f"⚠️ Could not load summary or messages for topic "
+                    f"`#{topic_id}` (`{topic_title}`).",
                     ephemeral=True,
                 )
                 return
@@ -1788,6 +1942,12 @@ def create_bot() -> commands.Bot:
                 out_channel = bot.get_channel(int(output_channel_id))
                 if out_channel is None:
                     out_channel = await bot.fetch_channel(int(output_channel_id))
+                if (
+                    out_channel is not None
+                    and getattr(out_channel, "guild", None) is not None
+                    and str(out_channel.guild.id) != guild_id
+                ):
+                    out_channel = None
             except Exception:
                 out_channel = None
 
@@ -1795,40 +1955,55 @@ def create_bot() -> commands.Bot:
             try:
                 sent_out = await out_channel.send(embed=summary_embed)
                 await interaction.followup.send(
-                    f"✅ Summary for topic **#{topic_id} — {selected_topic.get('title')}** has been published to <#{output_channel_id}>: {sent_out.jump_url}",
+                    f"✅ Summary for topic **#{topic_id} — {selected_topic.get('title')}** "
+                    f"has been published to <#{output_channel_id}>: {sent_out.jump_url}",
                     embed=summary_embed,
                     ephemeral=True,
                 )
                 return
             except Exception as send_out_err:
-                print(f"⚠️ Could not post summary to output channel {output_channel_id}: {send_out_err}")
+                print(
+                    f"⚠️ Could not post summary to output channel {output_channel_id}: "
+                    f"{send_out_err}"
+                )
 
         await interaction.followup.send(embed=summary_embed, ephemeral=True)
 
-    @bot.tree.command(name="ping", description="Check whether Coconerd Bot is responsive and measure gateway latency")
+    @bot.tree.command(
+        name="ping",
+        description="Check whether Coconerd Bot is responsive and measure gateway latency",
+    )
     async def ping_command(interaction: discord.Interaction):
         latency_ms = round(bot.latency * 1000)
-        await interaction.response.send_message(f"🥥 Pong! Discord Gateway latency: **{latency_ms}ms**", ephemeral=True)
+        await interaction.response.send_message(
+            f"🥥 Pong! Discord Gateway latency: **{latency_ms}ms**", ephemeral=True
+        )
 
     @bot.tree.error
     async def on_app_command_error(
         interaction: discord.Interaction,
         error: app_commands.AppCommandError,
     ) -> None:
-        """Centralized error handler ensuring unauthorized users and command errors always receive an ephemeral response within Discord's deadline."""
+        """Centralized error handler ensuring command errors receive an ephemeral response."""
         command_name = interaction.command.name if interaction.command else "command"
         orig = getattr(error, "original", error)
 
         # Silently log expired or unknown interactions (code 10062)
         if isinstance(orig, discord.NotFound) and getattr(orig, "code", None) == 10062:
-            print(f"⚠️ [SLASH ERROR] /{command_name}: Interaction expired before it could be acknowledged (code 10062).")
+            print(
+                f"⚠️ [SLASH ERROR] /{command_name}: "
+                "Interaction expired before it could be acknowledged (code 10062)."
+            )
             return
 
         # Determine user-facing message based on error type
         if isinstance(error, (app_commands.MissingPermissions, app_commands.CheckFailure)):
             if isinstance(error, app_commands.MissingPermissions) and error.missing_permissions:
                 missing = [p.replace("_", " ").title() for p in error.missing_permissions]
-                msg = f"❌ You don't have permission to use this command. Required permission: {', '.join(missing)}."
+                msg = (
+                    "❌ You don't have permission to use this command. "
+                    f"Required permission: {', '.join(missing)}."
+                )
             else:
                 msg = "❌ You don't have permission to use this command."
         elif isinstance(error, app_commands.CommandOnCooldown):
@@ -1848,9 +2023,15 @@ def create_bot() -> commands.Bot:
             else:
                 await interaction.response.send_message(msg, ephemeral=True)
         except discord.NotFound:
-            print(f"⚠️ [SLASH ERROR] /{command_name}: Interaction expired (10062) while sending error response.")
+            print(
+                f"⚠️ [SLASH ERROR] /{command_name}: "
+                "Interaction expired (10062) while sending error response."
+            )
         except Exception as send_err:
-            print(f"⚠️ [SLASH ERROR] Failed to send interaction response for /{command_name}: {send_err}")
+            print(
+                f"⚠️ [SLASH ERROR] Failed to send interaction response for "
+                f"/{command_name}: {send_err}"
+            )
 
     return bot
 
@@ -1864,7 +2045,10 @@ def main() -> None:
         bot.run(token, log_handler=None)
     except discord.errors.LoginFailure:
         print("❌ Lỗi xác thực: DISCORD_BOT_TOKEN không hợp lệ hoặc đã bị Reset/Thu hồi.")
-        print("👉 Vui lòng kiểm tra lại Bot Token trên Discord Developer Portal -> Bot -> Reset Token.")
+        print(
+            "👉 Vui lòng kiểm tra lại Bot Token trên Discord Developer Portal "
+            "-> Bot -> Reset Token."
+        )
         sys.exit(1)
     except discord.errors.PrivilegedIntentsRequired:
         print("❌ Lỗi phân quyền: Bot chưa được bật 'Message Content Intent'.")

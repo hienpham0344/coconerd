@@ -9,18 +9,66 @@ import random
 # Predefined startup greetings for the configured channel (~10-15 variations)
 STARTUP_GREETINGS = [
     "YO. WHO INVITED THIS COCONUT? 🥥\n\noh wait. you did.\n\nwell, bruh. we're so back.",
-    "🥥 COCONERD HAS ENTERED THE CHAT.\n\nI bring organization, questionable humor, and absolutely no financial stability.\n\nbehave. or get coconut'd.",
-    "HELLO CHAT.\n\nYour local coconut has spawned.\n\nI have no idea what I'm doing, but at least your conversations might.",
-    "BRUH. A NEW SERVER.\n\nSo many conversations. So little brain cells.\n\nAnyway, let's cook. 🥥",
-    "🚨 COCONUT DETECTED 🚨\n\nThat's me. I'm the coconut.\n\nPlease remain calm. Or don't. I'm not your supervisor.",
-    "🌴 COCONERD ONLINE.\n\nFell from the tree directly into your server.\n\nChaos levels: nominal. Brain cells: zero.",
-    "🥥 BEEP BOOP. I'M A FRUIT.\n\nServer detected. Wi-Fi connected.\n\nLet the questionable decisions begin.",
-    "⚠️ WARNING: TROPICAL ENTITY ACTIVE.\n\nI have arrived to watch this server spiral in real-time.\n\nDrop your hottest takes.",
-    "🥥 RISE AND GRIND, COCONUT GANG.\n\nAnother day, another opportunity to pretend I know what's happening.\n\nWhat are we arguing about today?",
-    "🧠 BRAIN CELLS: BUFFERING.\n\nCoconerd is awake. Nobody panic.\n\nActually, panic. It's more fun that way. 🥥",
-    "🌴 GUESS WHO FELL OUT OF THE CLOUD AND INTO DISCORD?\n\nThat's right, your favorite sentient fruit.\n\nWe are so back.",
-    "🥥 SYSTEM STATUS: 100% UNHINGED.\n\nReady to supervise the mayhem.\n\nLet's get this bread. Or coconut water. Whatever.",
-    "🚨 EMERGENCY COCONUT BROADCAST 🚨\n\nI am now live in the server.\n\nMay the odds be ever in your unread mentions.",
+    (
+        "🥥 COCONERD HAS ENTERED THE CHAT.\n\n"
+        "I bring organization, questionable humor, and absolutely no financial stability.\n\n"
+        "behave. or get coconut'd."
+    ),
+    (
+        "HELLO CHAT.\n\n"
+        "Your local coconut has spawned.\n\n"
+        "I have no idea what I'm doing, but at least your conversations might."
+    ),
+    (
+        "BRUH. A NEW SERVER.\n\n"
+        "So many conversations. So little brain cells.\n\n"
+        "Anyway, let's cook. 🥥"
+    ),
+    (
+        "🚨 COCONUT DETECTED 🚨\n\n"
+        "That's me. I'm the coconut.\n\n"
+        "Please remain calm. Or don't. I'm not your supervisor."
+    ),
+    (
+        "🌴 COCONERD ONLINE.\n\n"
+        "Fell from the tree directly into your server.\n\n"
+        "Chaos levels: nominal. Brain cells: zero."
+    ),
+    (
+        "🥥 BEEP BOOP. I'M A FRUIT.\n\n"
+        "Server detected. Wi-Fi connected.\n\n"
+        "Let the questionable decisions begin."
+    ),
+    (
+        "⚠️ WARNING: TROPICAL ENTITY ACTIVE.\n\n"
+        "I have arrived to watch this server spiral in real-time.\n\n"
+        "Drop your hottest takes."
+    ),
+    (
+        "🥥 RISE AND GRIND, COCONUT GANG.\n\n"
+        "Another day, another opportunity to pretend I know what's happening.\n\n"
+        "What are we arguing about today?"
+    ),
+    (
+        "🧠 BRAIN CELLS: BUFFERING.\n\n"
+        "Coconerd is awake. Nobody panic.\n\n"
+        "Actually, panic. It's more fun that way. 🥥"
+    ),
+    (
+        "🌴 GUESS WHO FELL OUT OF THE CLOUD AND INTO DISCORD?\n\n"
+        "That's right, your favorite sentient fruit.\n\n"
+        "We are so back."
+    ),
+    (
+        "🥥 SYSTEM STATUS: 100% UNHINGED.\n\n"
+        "Ready to supervise the mayhem.\n\n"
+        "Let's get this bread. Or coconut water. Whatever."
+    ),
+    (
+        "🚨 EMERGENCY COCONUT BROADCAST 🚨\n\n"
+        "I am now live in the server.\n\n"
+        "May the odds be ever in your unread mentions."
+    ),
 ]
 
 # 1. Greetings & Casual Acknowledgment

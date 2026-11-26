@@ -33,9 +33,10 @@ async def listen_action_events(backend, wakeup: asyncio.Event) -> None:
                 async for message in socket:
                     if message.type == aiohttp.WSMsgType.TEXT:
                         data = message.json()
-                        if isinstance(data, dict) and data.get("type") == "actions_available":
+                        if isinstance(data, dict):
                             backoff = 1.0
-                            wakeup.set()
+                            if data.get("type") == "actions_available":
+                                wakeup.set()
                     elif message.type == aiohttp.WSMsgType.ERROR:
                         break
             logger.warning("Action socket disconnected; HTTP polling remains active")

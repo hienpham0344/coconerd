@@ -107,9 +107,14 @@ class TopicDelivery:
             thread = self.bot.get_channel(int(identifier))
             if thread is None:
                 thread = await self.bot.fetch_channel(int(identifier))
-        except discord.NotFound:
+        except (discord.NotFound, ValueError, TypeError):
             return None
-        if str(thread.guild.id) != guild_id or str(getattr(thread, "parent_id", "")) != output_id:
+        thread_guild = getattr(thread, "guild", None)
+        if (
+            thread_guild is None
+            or str(thread_guild.id) != guild_id
+            or str(getattr(thread, "parent_id", "")) != output_id
+        ):
             return None
         if getattr(thread, "archived", False):
             await thread.edit(archived=False)
@@ -247,7 +252,10 @@ class TopicDelivery:
             output = await self.bot.fetch_channel(int(output_id))
         if str(output.guild.id) != guild_id or not isinstance(output, discord.TextChannel):
             raise DeliveryError("Output must be a text channel in the action's guild")
-        member = output.guild.me or output.guild.get_member(self.bot.user.id)
+        bot_user = getattr(self.bot, "user", None)
+        member = output.guild.me or (
+            output.guild.get_member(bot_user.id) if bot_user is not None else None
+        )
         if member:
             permissions = output.permissions_for(member)
             required = (
@@ -278,9 +286,12 @@ class TopicDelivery:
             if header_id:
                 with suppress(discord.NotFound):
                     header = await output.fetch_message(int(header_id))
-            title = " ".join(
-                str(topic.get("title") or action["payload"].get("title") or "Chủ đề mới").split()
-            )[:100]
+            title = (
+                " ".join(
+                    str(topic.get("title") or action["payload"].get("title") or "").split()
+                )[:100]
+                or "Chủ đề mới"
+            )
             if header is None:
                 header = await output.send(
                     title,

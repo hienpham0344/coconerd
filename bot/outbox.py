@@ -51,7 +51,7 @@ async def process_outbox_actions(bot) -> None:
                             action_id,
                             bot.worker_id,
                             type(exc).__name__,
-                            str(exc),
+                            str(exc) or type(exc).__name__,
                             retryable=retryable,
                         )
             except Exception as exc:

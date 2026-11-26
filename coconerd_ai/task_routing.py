@@ -61,7 +61,7 @@ def _number(value: object, low: float, high: float, *, integer: bool = False) ->
 
 
 def validate_meta_endpoint(value: str) -> str:
-    if value.rstrip("/") != META_API_BASE:
+    if not isinstance(value, str) or value.rstrip("/") != META_API_BASE:
         raise TaskConfigurationError("Only the canonical Meta API endpoint is allowed")
     return META_API_BASE
 
