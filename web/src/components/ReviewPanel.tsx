@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { dashboardRequest, liveClient } from '../data/live';
 import { ApiError } from '../data/api';
-import { memoryFields, operationId, snapshotFor, validateSnapshots, type OperationDraft } from '../data/review';
+import { memoryFields, normalizeSnapshot, operationId, snapshotFor, validateSnapshots, type OperationDraft } from '../data/review';
 import { ErrorState, Loading, errorMessage } from './Feedback';
 import type { Review, ReviewedSummary, SyncState, Topic, TopicPage } from '../types';
 
@@ -19,40 +19,52 @@ export function ReviewPanel({ guildId, messageId, csrf, onChanged }: { guildId: 
   const [conflict, setConflict] = useState(false);
   const operation = useRef<OperationDraft>({});
   useEffect(() => {
-    let active = true; setBusy(true); setReview(null); setError(''); setConflict(false);
-    void dashboardRequest<Review>(guildId, 'messages/' + encodeURIComponent(messageId) + '/review', csrf)
+    let active = true;
+    const controller = new AbortController();
+    setBusy(true); setReview(null); setError(''); setConflict(false);
+    void dashboardRequest<Review>(guildId, 'messages/' + encodeURIComponent(messageId) + '/review', csrf, 'GET', undefined, controller.signal)
       .then(value => { if (active) { setReview(value); setTarget(value.topic_id || ''); } })
-      .catch(e => { if (active) setError(errorMessage(e)); }).finally(() => { if (active) setBusy(false); });
-    return () => { active = false; };
+      .catch(e => { if (active && !controller.signal.aborted) setError(errorMessage(e)); }).finally(() => { if (active) setBusy(false); });
+    return () => { active = false; controller.abort(); };
   }, [guildId, messageId, csrf, revision]);
   useEffect(() => {
     let active = true;
+    const controller = new AbortController();
     const timer = setTimeout(() => {
-      void dashboardRequest<TopicPage>(guildId, 'topics?limit=100&q=' + encodeURIComponent(search), csrf)
-        .then(value => { if (active) setOptions(value.items); }).catch(e => { if (active) setError(errorMessage(e)); });
+      void dashboardRequest<TopicPage>(guildId, 'topics?limit=100&q=' + encodeURIComponent(search), csrf, 'GET', undefined, controller.signal)
+        .then(value => { if (active) setOptions(value.items); }).catch(e => { if (active && !controller.signal.aborted) setError(errorMessage(e)); });
     }, 250);
-    return () => { active = false; clearTimeout(timer); };
-  }, [guildId, csrf, search]);
+    return () => { active = false; clearTimeout(timer); controller.abort(); };
+  }, [guildId, csrf, search, revision]);
   useEffect(() => {
     if (!review) return;
-    let active = true; setSnapshots([]); setLoadingSnapshots(true); setError('');
+    let active = true;
+    const controller = new AbortController();
+    setSnapshots([]); setLoadingSnapshots(true); setError(''); setConflict(false);
     const ids = [...new Set([review.topic_id, target || null].filter((id): id is string => !!id))];
     void Promise.all(ids.map(async id => {
-      const topic = await api.topic(guildId, id);
-      const [summary, sync] = await Promise.all([api.summary(topic), dashboardRequest<SyncState>(guildId, 'topics/' + encodeURIComponent(id) + '/sync?limit=1', csrf)]);
+      const topic = await api.topic(guildId, id, controller.signal);
+      const [summary, sync] = await Promise.all([api.summary(topic, controller.signal), dashboardRequest<SyncState>(guildId, 'topics/' + encodeURIComponent(id) + '/sync?limit=1', csrf, 'GET', undefined, controller.signal)]);
       return { topic, snapshot: snapshotFor(id, summary, sync.version, messageId, target || null, review.topic_id) };
     })).then(items => {
-      if (active) { setSnapshots(items.map(item => item.snapshot)); setTitles(Object.fromEntries(items.map(item => [item.topic.topic_id, item.topic.title]))); }
-    }).catch(e => { if (active) setError(errorMessage(e)); }).finally(() => { if (active) setLoadingSnapshots(false); });
-    return () => { active = false; };
+      if (active) {
+        setSnapshots(items.map(item => item.snapshot));
+        setTitles(current => ({ ...current, ...Object.fromEntries(items.map(item => [item.topic.topic_id, item.topic.title])) }));
+      }
+    }).catch(e => { if (active && !controller.signal.aborted) setError(errorMessage(e)); }).finally(() => { if (active) setLoadingSnapshots(false); });
+    return () => { active = false; controller.abort(); };
   }, [api, guildId, review, target, csrf, messageId]);
   const update = (id: string, patch: Partial<ReviewedSummary>) => setSnapshots(items => items.map(item => item.topic_id === id ? { ...item, ...patch } : item));
   async function submit(event: FormEvent) {
-    event.preventDefault(); if (!review || loadingSnapshots) return;
+    event.preventDefault(); if (!review || loadingSnapshots || saving) return;
     setSaving(true); setError('');
     try {
-      validateSnapshots(snapshots);
-      const body = { reason, expected_revision: review.revision, target_topic_id: target || null, summaries: snapshots };
+      const trimmedReason = reason.trim();
+      if (!trimmedReason) throw new Error('Vui lòng nhập lý do sửa.');
+      const cleaned = snapshots.map(normalizeSnapshot);
+      setSnapshots(cleaned);
+      validateSnapshots(cleaned);
+      const body = { reason: trimmedReason, expected_revision: review.revision, target_topic_id: target || null, summaries: cleaned };
       await dashboardRequest(guildId, 'messages/' + encodeURIComponent(messageId) + '/corrections', csrf, 'POST', { ...body, request_id: operationId(operation.current, body) });
       onChanged();
     } catch (e) { setError(errorMessage(e)); setConflict(e instanceof ApiError && e.status === 409); } finally { setSaving(false); }

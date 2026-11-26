@@ -8,14 +8,14 @@ export class HttpError extends Error {
 export const hash = value => createHash('sha256').update(value).digest('hex');
 export const random = () => randomBytes(32).toString('base64url');
 export function equal(a, b) {
-  return typeof a === 'string' && typeof b === 'string' && Buffer.byteLength(a) === Buffer.byteLength(b) && timingSafeEqual(Buffer.from(a), Buffer.from(b));
+  return typeof a === 'string' && typeof b === 'string' && a.length > 0 && Buffer.byteLength(a) === Buffer.byteLength(b) && timingSafeEqual(Buffer.from(a), Buffer.from(b));
 }
 export function json(res, status, data) {
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
   res.end(status === 204 ? undefined : JSON.stringify(data));
 }
 export async function readBody(req) {
-  if (!/^application\/json(?:;|$)/i.test(req.headers['content-type'] || '')) throw new HttpError(415, 'Cần gửi dữ liệu JSON.');
+  if (!/^application\/json(?:\s*;|$)/i.test(req.headers['content-type'] || '')) throw new HttpError(415, 'Cần gửi dữ liệu JSON.');
   let parsed;
   try { parsed = req.body; } catch { throw new HttpError(400, 'Dữ liệu JSON không hợp lệ.'); }
   if (parsed !== undefined) {
@@ -91,7 +91,9 @@ export function createAuth(config) {
     try { data = await response.json(); } catch { throw new HttpError(502, 'Phản hồi backend không hợp lệ.'); }
     if (!response.ok) {
       const status = [400, 404, 409, 413, 422, 429].includes(response.status) ? response.status : 502;
-      const detail = status !== 502 && typeof data.detail === 'string' ? data.detail : 'Backend chưa sẵn sàng hoặc từ chối yêu cầu.';
+      const message = typeof data?.detail === 'string' ? data.detail
+        : Array.isArray(data?.detail) && typeof data.detail[0]?.msg === 'string' ? data.detail[0].msg : null;
+      const detail = status !== 502 && message ? message : 'Backend chưa sẵn sàng hoặc từ chối yêu cầu.';
       throw new HttpError(status, detail);
     }
     return data;
@@ -104,7 +106,7 @@ export function createAuth(config) {
   async function stored(kind, id, consume = false) {
     const path = credentialPath(kind, id);
     const record = await backend(path + (consume ? '/consume' : ''), { method: consume ? 'POST' : 'GET', missing: true });
-    if (!record || Date.parse(record.expires_at) <= Date.now()) return null;
+    if (!record || !(Date.parse(record.expires_at) > Date.now())) return null;
     const data = open(record.payload, path);
     Object.defineProperty(data, 'storedPayload', { value: record.payload });
     return data;
@@ -112,7 +114,7 @@ export function createAuth(config) {
   async function discord(path, token, bot = false) {
     if (!token) throw new HttpError(503, 'Kết nối Discord chưa sẵn sàng.');
     const response = await fetchResponse(API + path, { headers: { Authorization: (bot ? 'Bot ' : 'Bearer ') + token, Accept: 'application/json' } });
-    if (response.status === 401) throw new HttpError(401, 'Vui lòng đăng nhập lại bằng Discord.');
+    if (response.status === 401 && !bot) throw new HttpError(401, 'Vui lòng đăng nhập lại bằng Discord.');
     if (!response.ok) throw new HttpError(503, 'Chưa xác minh được dữ liệu hoặc quyền Discord. Vui lòng thử lại.');
     try { return await response.json(); } catch { throw new HttpError(503, 'Phản hồi Discord không hợp lệ.'); }
   }
@@ -124,6 +126,7 @@ export function createAuth(config) {
     if (!response.ok) throw new HttpError(response.status >= 500 || response.status === 429 ? 503 : 401, 'Chưa đăng nhập được Discord. Vui lòng thử lại.');
     let data;
     try { data = await response.json(); } catch { throw new HttpError(503, 'Phản hồi đăng nhập không hợp lệ.'); }
+    if (!data || typeof data !== 'object') throw new HttpError(503, 'Phản hồi đăng nhập không hợp lệ.');
     const scopes = new Set((data.scope || '').split(' '));
     if (data.token_type?.toLowerCase() !== 'bearer' || typeof data.access_token !== 'string' || !Number.isFinite(data.expires_in) || data.expires_in <= 0 || !scopes.has('identify') || !scopes.has('guilds')) throw new HttpError(401, 'Discord chưa cấp đủ quyền đăng nhập.');
     return { accessToken: data.access_token, refreshToken: data.refresh_token, tokenExpiresAt: Date.now() + data.expires_in * 1000 };
@@ -133,20 +136,21 @@ export function createAuth(config) {
     const id = cookieValue(req, cookieName);
     if (!id) throw new HttpError(401, 'Vui lòng đăng nhập bằng Discord.');
     let data = await stored('session', id);
-    if (!data || data.expiresAt <= Date.now()) throw new HttpError(401, 'Phiên đăng nhập đã hết hạn.');
-    if (data.tokenExpiresAt <= Date.now() + 15000) {
+    if (!data || !(data.expiresAt > Date.now())) throw new HttpError(401, 'Phiên đăng nhập đã hết hạn.');
+    if (!(data.tokenExpiresAt > Date.now() + 15000)) {
       if (!refreshing.has(id)) refreshing.set(id, (async () => {
         const latest = await stored('session', id);
-        if (!latest || latest.expiresAt <= Date.now()) throw new HttpError(401, 'Phiên đăng nhập đã hết hạn.');
+        if (!latest || !(latest.expiresAt > Date.now())) throw new HttpError(401, 'Phiên đăng nhập đã hết hạn.');
         if (latest.tokenExpiresAt > Date.now() + 15000) return latest;
         if (!latest.refreshToken) throw new HttpError(401, 'Vui lòng đăng nhập lại bằng Discord.');
         const updated = { ...latest, ...await token({ grant_type: 'refresh_token', refresh_token: latest.refreshToken }) };
         if (!updated.refreshToken) updated.refreshToken = latest.refreshToken;
+        if (!(updated.expiresAt > Date.now())) throw new HttpError(401, 'Phiên đăng nhập đã hết hạn.');
         try { await store('session', id, updated, updated.expiresAt, latest.storedPayload); }
         catch (error) {
           if (!(error instanceof HttpError) || error.status !== 409) throw error;
           const current = await stored('session', id);
-          if (!current || current.tokenExpiresAt <= Date.now() + 15000) throw new HttpError(401, 'Phiên đăng nhập đã thay đổi. Vui lòng đăng nhập lại.');
+          if (!current || !(current.tokenExpiresAt > Date.now() + 15000)) throw new HttpError(401, 'Phiên đăng nhập đã thay đổi. Vui lòng đăng nhập lại.');
           return current;
         }
         return updated;
@@ -159,35 +163,54 @@ export function createAuth(config) {
     if (req.headers.origin !== origin || !equal(req.headers['x-csrf-token'], data.csrfToken)) throw new HttpError(403, 'Yêu cầu xác nhận không hợp lệ. Vui lòng tải lại trang.');
   }
   const guildCache = new Map();
-  async function guilds(data, fresh = false) {
-    const cached = guildCache.get(hash(data.id));
-    if (!fresh && cached && cached.until > Date.now()) return cached.items;
+  const guildPending = new Map();
+  async function fetchGuilds(cacheKey, accessToken) {
     try {
-    const items = []; let after = '';
-    for (let page = 0; page < 10; page++) {
-      const batch = await discord('/users/@me/guilds?limit=200' + (after ? '&after=' + after : ''), data.accessToken);
-      if (!Array.isArray(batch)) throw new HttpError(503, 'Chưa đọc được quyền Discord.');
-      for (const g of batch) {
-        if (!/^\d{15,22}$/.test(g.id)) continue;
-        const admin = /^\d+$/.test(g.permissions || '') && (BigInt(g.permissions) & 8n) !== 0n;
-        if (g.owner === true || admin) items.push({ id: g.id, name: String(g.name || g.id) });
+      const items = []; let after = '';
+      for (let page = 0; page < 10; page++) {
+        const batch = await discord('/users/@me/guilds?limit=200' + (after ? '&after=' + after : ''), accessToken);
+        if (!Array.isArray(batch)) throw new HttpError(503, 'Chưa đọc được quyền Discord.');
+        for (const g of batch) {
+          if (!g || typeof g !== 'object' || !/^\d{15,22}$/.test(g.id)) continue;
+          const admin = /^\d+$/.test(g.permissions || '') && (BigInt(g.permissions) & 8n) !== 0n;
+          if (g.owner === true || admin) items.push({ id: g.id, name: String(g.name || g.id) });
+        }
+        if (batch.length < 200) {
+          const now = Date.now();
+          if (guildCache.size >= 2000) {
+            for (const [k, v] of guildCache) if (v.until <= now) guildCache.delete(k);
+            if (guildCache.size >= 2000) guildCache.delete(guildCache.keys().next().value);
+          }
+          guildCache.set(cacheKey, { items, until: now + 30000 });
+          return items;
+        }
+        const next = batch.at(-1)?.id;
+        if (!/^\d{15,22}$/.test(next) || next === after) break;
+        after = next;
       }
-      if (batch.length < 200) {
-        if (guildCache.size > 2000) guildCache.clear();
-        guildCache.set(hash(data.id), { items, until: Date.now() + 30000 });
-        return items;
-      }
-      const next = batch.at(-1)?.id;
-      if (!/^\d{15,22}$/.test(next) || next === after) break;
-      after = next;
+      throw new HttpError(503, 'Chưa đọc đầy đủ quyền Discord.');
+    } catch (error) { guildCache.delete(cacheKey); throw error; }
+  }
+  async function guilds(data, fresh = false) {
+    const cacheKey = hash(data.id);
+    const cached = guildCache.get(cacheKey);
+    if (!fresh && cached && cached.until > Date.now()) return cached.items;
+    if (fresh) {
+      guildPending.delete(cacheKey);
+      return fetchGuilds(cacheKey, data.accessToken);
     }
-    throw new HttpError(503, 'Chưa đọc đầy đủ quyền Discord.');
-    } catch (error) { guildCache.delete(hash(data.id)); throw error; }
+    if (!guildPending.has(cacheKey)) {
+      const promise = fetchGuilds(cacheKey, data.accessToken).finally(() => {
+        if (guildPending.get(cacheKey) === promise) guildPending.delete(cacheKey);
+      });
+      guildPending.set(cacheKey, promise);
+    }
+    return guildPending.get(cacheKey);
   }
   async function channels(guild) {
     const items = await discord('/guilds/' + guild + '/channels', config.discordBotToken, true);
     if (!Array.isArray(items)) throw new HttpError(503, 'Chưa đọc được danh sách kênh.');
-    return items.filter(item => [0, 5].includes(item.type) && /^\d{15,22}$/.test(item.id) && (!item.guild_id || item.guild_id === guild)).map(item => ({ id: item.id, name: String(item.name), type: item.type }));
+    return items.filter(item => item && typeof item === 'object' && [0, 5].includes(item.type) && /^\d{15,22}$/.test(item.id) && (!item.guild_id || item.guild_id === guild)).map(item => ({ id: item.id, name: String(item.name), type: item.type }));
   }
   async function start(req, res) {
     const state = random(); const verifier = random();
@@ -198,14 +221,24 @@ export function createAuth(config) {
   }
   async function callback(req, res, url) {
     const state = url.searchParams.get('state');
-    if (url.searchParams.getAll('state').length !== 1 || url.searchParams.getAll('code').length !== 1 || !equal(state, cookieValue(req, stateName)) || url.searchParams.get('iss') !== 'https://discord.com') throw new HttpError(400, 'Yêu cầu đăng nhập đã hết hạn hoặc không hợp lệ.');
+    const code = url.searchParams.get('code');
+    if ([...url.searchParams.keys()].some(k => !['code', 'state', 'iss'].includes(k)) ||
+        url.searchParams.getAll('state').length !== 1 ||
+        url.searchParams.getAll('code').length !== 1 ||
+        url.searchParams.getAll('iss').length !== 1 ||
+        !code || !equal(state, cookieValue(req, stateName)) ||
+        url.searchParams.get('iss') !== 'https://discord.com') throw new HttpError(400, 'Yêu cầu đăng nhập đã hết hạn hoặc không hợp lệ.');
     const saved = await stored('oauth', state, true);
     if (!saved) throw new HttpError(400, 'Yêu cầu đăng nhập đã được dùng hoặc hết hạn.');
-    const tokens = await token({ grant_type: 'authorization_code', code: url.searchParams.get('code'), redirect_uri: config.redirectUri, code_verifier: saved.verifier });
+    const tokens = await token({ grant_type: 'authorization_code', code, redirect_uri: config.redirectUri, code_verifier: saved.verifier });
     const user = await discord('/users/@me', tokens.accessToken);
-    if (!/^\d{15,22}$/.test(user.id) || typeof user.username !== 'string') throw new HttpError(401, 'Danh tính Discord không hợp lệ.');
+    if (!user || typeof user !== 'object' || !/^\d{15,22}$/.test(user.id) || typeof user.username !== 'string') throw new HttpError(401, 'Danh tính Discord không hợp lệ.');
     const old = cookieValue(req, cookieName);
-    if (old) await backend(credentialPath('session', old), { method: 'DELETE' });
+    if (old) {
+      await backend(credentialPath('session', old), { method: 'DELETE' });
+      guildCache.delete(hash(old));
+      guildPending.delete(hash(old));
+    }
     const id = random();
     const data = { ...tokens, user: { id: user.id, username: user.username, displayName: user.global_name || user.username }, csrfToken: random(), expiresAt: Date.now() + TTL };
     await store('session', id, data, data.expiresAt);
@@ -215,6 +248,7 @@ export function createAuth(config) {
     csrf(req, data);
     await backend(credentialPath('session', data.id), { method: 'DELETE' });
     guildCache.delete(hash(data.id));
+    guildPending.delete(hash(data.id));
     res.setHeader('Set-Cookie', cookie(cookieName, '', 0)); json(res, 204);
   }
   return { enabled, backend, session, csrf, guilds, channels, start, callback, logout, cookie, cookieName };

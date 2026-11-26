@@ -12,11 +12,14 @@ const host = process.env.HOST || '127.0.0.1';
 const port = Number(process.env.PORT || 5173);
 const server = createServer();
 const vite = dev ? await (await import('vite')).createServer({ root, server: { middlewareMode: true, hmr: { server } }, appType: 'spa' }) : null;
-const mime = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.webp': 'image/webp', '.woff2': 'font/woff2', '.json': 'application/json' };
+const mime = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.webp': 'image/webp', '.woff2': 'font/woff2', '.json': 'application/json; charset=utf-8', '.ico': 'image/x-icon' };
 
 async function staticHandler(req, res) {
   let pathname;
-  try { pathname = decodeURIComponent(new URL(req.url, 'http://localhost').pathname); } catch { res.writeHead(400).end(); return; }
+  try {
+    if (typeof req.url !== 'string' || !req.url.startsWith('/') || req.url.startsWith('//')) throw new Error();
+    pathname = decodeURIComponent(new URL(req.url, 'http://localhost').pathname);
+  } catch { res.writeHead(400).end(); return; }
   if (isPrivatePath(pathname, dev)) { res.writeHead(404).end(); return; }
   if (!['GET', 'HEAD'].includes(req.method)) { res.writeHead(405).end(); return; }
   if (vite) return vite.middlewares(req, res);
@@ -26,7 +29,7 @@ async function staticHandler(req, res) {
   try {
     const info = await stat(filename).catch(() => null);
     if (!info?.isFile()) {
-      if (path.extname(pathname)) { res.writeHead(404).end(); return; }
+      if (path.extname(pathname) || pathname.startsWith('/assets/')) { res.writeHead(404).end(); return; }
       filename = path.join(dist, 'index.html');
     }
     const data = await readFile(filename);

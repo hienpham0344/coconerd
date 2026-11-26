@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { ArrowDown, ArrowRight, ArrowUpRight, Check, ChevronDown, Hash, Leaf, LockKeyhole, MessageCircle, RefreshCw, Search, ShieldCheck, Sparkles } from 'lucide-react';
 import { Flower } from '../components/Brand';
 import { PublicLayout, PageIntro } from '../components/PublicLayout';
-import { errorMessage } from '../components/Feedback';
+import { errorMessage, parseDate } from '../components/Feedback';
 import { useReducedMotion } from '../hooks/useReducedMotion';
 import { request } from '../data/api';
 import { faqs, matchesText } from '../data/content';
@@ -36,16 +36,17 @@ function HelpAvailability() {
   const [revision, setRevision] = useState(0);
   useEffect(() => {
     let active = true;
+    const controller = new AbortController();
     setConfig(null); setStatus(null); setErrors({ links: '', status: '' });
-    void request<SiteConfig>('/api/site').then(result => { if (active) setConfig(result); }).catch(cause => { if (active) setErrors(current => ({ ...current, links: errorMessage(cause) })); });
-    void request<PublicStatus>('/api/status').then(result => { if (active) setStatus(result); }).catch(cause => { if (active) setErrors(current => ({ ...current, status: errorMessage(cause) })); });
-    return () => { active = false; };
+    void request<SiteConfig>('/api/site', { signal: controller.signal }).then(result => { if (active) setConfig(result); }).catch(cause => { if (active && !controller.signal.aborted) setErrors(current => ({ ...current, links: errorMessage(cause) })); });
+    void request<PublicStatus>('/api/status', { signal: controller.signal }).then(result => { if (active) setStatus(result); }).catch(cause => { if (active && !controller.signal.aborted) setErrors(current => ({ ...current, status: errorMessage(cause) })); });
+    return () => { active = false; controller.abort(); };
   }, [revision]);
   const labels = { ok: 'Dịch vụ đang sẵn sàng', degraded: 'Một phần dịch vụ cần chú ý', unavailable: 'Chưa nhận được phản hồi', unconfigured: 'Trạng thái bot chưa được công bố' };
   const componentLabels = { ok: 'hoạt động', unavailable: 'không sẵn sàng', unknown: 'chưa xác minh' };
   return <section className="help-contact" id="help-contact"><div className="help-contact-heading"><span className="eyebrow lime">03 / KHI BẠN CẦN THÊM</span><button className="icon-button" onClick={() => setRevision(n => n + 1)} aria-label="Làm mới thông tin hỗ trợ và trạng thái"><RefreshCw size={15} /></button></div><div className="help-contact-grid">
     <article><MessageCircle size={23} strokeWidth={1.4} /><h2>Cần một chút trợ giúp?</h2>{errors.links ? <p role="alert">{errors.links}</p> : !config ? <p role="status">Đang kiểm tra kênh hỗ trợ…</p> : config.supportUrl ? <><p>Ghé server hỗ trợ chính thức để trao đổi cùng cộng đồng.</p><a className="text-link" href={config.supportUrl} target="_blank" rel="noreferrer">Mở server hỗ trợ <ArrowUpRight size={16} /></a></> : <p>Kênh hỗ trợ chính thức đang được chuẩn bị. Bạn có thể bắt đầu với các câu hỏi ở trên hoặc thử một cuộc trò chuyện mẫu.</p>}</article>
-    <article><Leaf size={23} strokeWidth={1.4} /><h2>Khu vườn hôm nay</h2>{errors.status ? <p role="alert">{errors.status}</p> : !status ? <p role="status">Đang kiểm tra trạng thái…</p> : <><p className={`help-service-state ${status.status === 'ok' ? 'state-ok' : ''}`}><span />{labels[status.status]}</p>{status.status !== 'unconfigured' && <><p className="small-note">Lưu trữ: {componentLabels[status.database]}. Xử lý chủ đề: {componentLabels[status.worker]}.</p><p className="small-note">Kiểm tra lúc {new Date(status.checkedAt).toLocaleString('vi-VN')}. Không xác nhận kết nối Discord.</p></>}</>}</article>
+    <article><Leaf size={23} strokeWidth={1.4} /><h2>Khu vườn hôm nay</h2>{errors.status ? <p role="alert">{errors.status}</p> : !status ? <p role="status">Đang kiểm tra trạng thái…</p> : <><p className={`help-service-state ${status.status === 'ok' ? 'state-ok' : ''}`}><span />{labels[status.status] || labels.unavailable}</p>{status.status !== 'unconfigured' && <><p className="small-note">Lưu trữ: {componentLabels[status.database] || componentLabels.unknown}. Xử lý chủ đề: {componentLabels[status.worker] || componentLabels.unknown}.</p><p className="small-note">Kiểm tra lúc {parseDate(status.checkedAt).toLocaleString('vi-VN')}. Không xác nhận kết nối Discord.</p></>}</>}</article>
   </div></section>;
 }
 

@@ -24,5 +24,5 @@ export function App() {
     <PageMotion route={route}>
       {route === '/' ? <Landing /> : /^\/app(?:\/|$)/.test(route) ? <LiveDashboard route={route} /> : /^\/demo(?:\/|$)/.test(route) ? <Dashboard route={route} /> : <PublicPages route={route} />}
     </PageMotion>
-  </Suspense>{navigation.inviteOpen && <InviteDialog onClose={() => { location.hash = route; }} />}</>;
+  </Suspense>{navigation.inviteOpen && <InviteDialog onClose={() => { setNavigation(current => ({ ...current, inviteOpen: false, resetScroll: false })); if ((location.hash.replace(/^#/, '') || '/') !== route) location.hash = route; }} />}</>;
 }

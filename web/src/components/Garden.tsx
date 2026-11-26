@@ -31,7 +31,8 @@ export default function Garden({ paused, hovering }: { paused: boolean; hovering
     composer.addPass(new RenderPass(scene, camera));
     const bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), .65, .6, .6);
     composer.addPass(bloom);
-    composer.addPass(new OutputPass());
+    const output = new OutputPass();
+    composer.addPass(output);
     let seed = 99142;
     const random = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
     const count = mobile ? 5200 : 11000;
@@ -141,9 +142,13 @@ export default function Garden({ paused, hovering }: { paused: boolean; hovering
     dustGeometry.setAttribute('position', new THREE.Float32BufferAttribute(dust, 3));
     const dustMaterial = new THREE.PointsMaterial({ color: '#d7c5a4', size: .025, transparent: true, opacity: .35 });
     const particles = new THREE.Points(dustGeometry, dustMaterial); scene.add(particles);
-    let width = 1, height = 1, visible = true, pausedRendered = false;
+    let width = 1, height = 1, visible = true, pausedRendered = false, contextLost = false;
     const resize = () => {
-      width = host.clientWidth; height = host.clientHeight;
+      width = Math.max(1, host.clientWidth); height = Math.max(1, host.clientHeight);
+      const isMobile = window.innerWidth < 820;
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, isMobile ? 1.25 : 1.5));
+      composer.setPixelRatio(isMobile ? .65 : .85);
+      uniforms.uRatio.value = renderer.getPixelRatio();
       camera.aspect = width / height; camera.updateProjectionMatrix();
       renderer.setSize(width, height); composer.setSize(width, height);
       pausedRendered = false;
@@ -154,11 +159,15 @@ export default function Garden({ paused, hovering }: { paused: boolean; hovering
     const mouse = new THREE.Vector2(0, 0);
     const onMove = (event: PointerEvent) => { const rect = host.getBoundingClientRect(); mouse.set((event.clientX - rect.left) / width * 2 - 1, -((event.clientY - rect.top) / height * 2 - 1)); uniforms.uMouse.value.copy(mouse); };
     const onLeave = () => { mouse.set(0, 0); uniforms.uMouse.value.set(3, 3); };
+    const onContextLost = (event: Event) => { event.preventDefault(); contextLost = true; };
+    const onContextRestored = () => { contextLost = false; pausedRendered = false; resize(); };
+    renderer.domElement.addEventListener('webglcontextlost', onContextLost);
+    renderer.domElement.addEventListener('webglcontextrestored', onContextRestored);
     window.addEventListener('pointermove', onMove, { passive: true }); document.addEventListener('pointerleave', onLeave);
     let frame = 0, time = 0, last = 0;
     const animate = (now: number) => {
       frame = requestAnimationFrame(animate);
-      if (!visible || document.hidden) return;
+      if (contextLost || !visible || document.hidden) return;
       if (state.current.paused && pausedRendered) return;
       if (now - last < 1000 / 30) return;
       const delta = Math.min((now - last) / 1000, .05); last = now;
@@ -179,9 +188,11 @@ export default function Garden({ paused, hovering }: { paused: boolean; hovering
     frame = requestAnimationFrame(animate); setReady(true);
     return () => {
       cancelAnimationFrame(frame); observer.disconnect(); intersection.disconnect();
+      renderer.domElement.removeEventListener('webglcontextlost', onContextLost);
+      renderer.domElement.removeEventListener('webglcontextrestored', onContextRestored);
       window.removeEventListener('pointermove', onMove); document.removeEventListener('pointerleave', onLeave);
       geometry.dispose(); material.dispose(); stemGeometry.dispose(); stemMaterial.dispose(); dustGeometry.dispose(); dustMaterial.dispose();
-      bloom.dispose(); composer.dispose(); renderer.dispose(); renderer.domElement.remove();
+      output.dispose(); bloom.dispose(); composer.dispose(); renderer.dispose(); renderer.domElement.remove();
     };
   }, []);
   return <div className={`garden ${ready ? 'garden-ready' : ''}`} ref={container} aria-hidden="true"><div className="garden-fallback" /><div className="garden-shade" /></div>;

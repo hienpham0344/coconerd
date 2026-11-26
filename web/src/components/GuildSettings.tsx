@@ -12,22 +12,38 @@ export function GuildSettings({ guildId, csrf, onChanged }: { guildId: string; c
   const [busy, setBusy] = useState(true); const [saving, setSaving] = useState('');
   const [revision, setRevision] = useState(0);
   useEffect(() => {
-    let active = true; setBusy(true); setError('');
+    let active = true;
+    const controller = new AbortController();
+    setBusy(true); setError(''); setNotice('');
     void Promise.all([
-      dashboardRequest<Guild>(guildId, 'settings', csrf),
-      dashboardRequest<ModelConfig>(guildId, 'model', csrf),
-      dashboardRequest<{ items: Channel[] }>(guildId, 'channels', csrf),
-    ]).then(([settings, model, channels]) => { if (active) { setSettings(settings); setModel(model); setChannels(channels.items); } })
-      .catch(e => { if (active) setError(errorMessage(e)); }).finally(() => { if (active) setBusy(false); });
-    return () => { active = false; };
+      dashboardRequest<Guild>(guildId, 'settings', csrf, 'GET', undefined, controller.signal),
+      dashboardRequest<ModelConfig>(guildId, 'model', csrf, 'GET', undefined, controller.signal),
+      dashboardRequest<{ items: Channel[] }>(guildId, 'channels', csrf, 'GET', undefined, controller.signal),
+    ]).then(([loadedSettings, loadedModel, loadedChannels]) => {
+      if (!active) return;
+      const validIds = new Set(loadedChannels.items.map(c => c.id));
+      setSettings({
+        ...loadedSettings,
+        allowed_channel_ids: loadedSettings.allowed_channel_ids.filter(id => validIds.has(id)),
+        output_channel_id: loadedSettings.output_channel_id && validIds.has(loadedSettings.output_channel_id) ? loadedSettings.output_channel_id : null,
+      });
+      setModel(loadedModel);
+      setChannels(loadedChannels.items);
+    }).catch(e => { if (active && !controller.signal.aborted) setError(errorMessage(e)); }).finally(() => { if (active) setBusy(false); });
+    return () => { active = false; controller.abort(); };
   }, [guildId, csrf, revision]);
   async function save(event: FormEvent, kind: 'settings' | 'model') {
-    event.preventDefault(); if (!settings || !model) return;
+    event.preventDefault(); if (!settings || !model || saving) return;
     setSaving(kind); setError(''); setNotice('');
+    const validIds = new Set(channels.map(c => c.id));
+    const trimmedModelId = model.model_id.trim();
+    if (kind === 'model' && !trimmedModelId) { setSaving(''); setError('Vui lòng nhập tên model.'); return; }
     const body = kind === 'settings' ? {
-      enabled: settings.enabled, allowed_channel_ids: settings.allowed_channel_ids,
-      output_channel_id: settings.output_channel_id || null, retention_days: settings.retention_days,
-    } : { provider: 'meta', model_id: model.model_id, temperature: model.temperature, max_tokens: model.max_tokens };
+      enabled: settings.enabled,
+      allowed_channel_ids: settings.allowed_channel_ids.filter(id => validIds.has(id)),
+      output_channel_id: settings.output_channel_id && validIds.has(settings.output_channel_id) ? settings.output_channel_id : null,
+      retention_days: settings.retention_days,
+    } : { provider: 'meta', model_id: trimmedModelId, temperature: model.temperature, max_tokens: model.max_tokens };
     try {
       await dashboardRequest(guildId, kind, csrf, 'PUT', body);
       setNotice(kind === 'settings' ? 'Đã lưu cấu hình server.' : 'Đã lưu cấu hình AI cho server này.');

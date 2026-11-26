@@ -82,13 +82,10 @@ async def test_dashboard_reads_are_authenticated_scoped_and_paginated(tmp_path):
 
 @pytest.mark.asyncio
 async def test_real_backend_workflow_and_web_edits_use_isolated_database(tmp_path):
+    from backend.infrastructure.database.connection import create_session_factory
     from backend.worker import ConversationWorker
 
     database_url = f"sqlite+aiosqlite:///{tmp_path / 'integration.db'}"
-    engine = create_async_engine(database_url)
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    factory = async_sessionmaker(engine, expire_on_commit=False)
     settings = Settings(
         _env_file=None,
         database_url=database_url,
@@ -97,6 +94,10 @@ async def test_real_backend_workflow_and_web_edits_use_isolated_database(tmp_pat
         app_env="test",
         mock_llm=True,
     )
+    factory = create_session_factory(settings)
+    engine = factory.kw["bind"]
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
     app = create_bridge(settings, factory)
     admin = {"X-Admin-API-Key": "test-admin"}
     bot = {"X-API-Key": "test-bot"}
@@ -165,3 +166,27 @@ async def test_real_backend_workflow_and_web_edits_use_isolated_database(tmp_pat
         ).json()
         assert closed["total"] == 1
     await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_bridge_application_validates_database_configuration(tmp_path, monkeypatch):
+    from bridge.app import application
+
+    monkeypatch.delenv("COCONERD_DATABASE_URL", raising=False)
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    with pytest.raises(RuntimeError, match="Set COCONERD_DATABASE_URL"):
+        application()
+
+    missing_db = tmp_path / "missing.db"
+    monkeypatch.setenv("COCONERD_DATABASE_URL", f"sqlite+aiosqlite:///{missing_db}")
+    with pytest.raises(RuntimeError, match="does not exist"):
+        application()
+
+    existing_db = tmp_path / "existing.db"
+    existing_db.write_bytes(b"")
+    monkeypatch.setenv("COCONERD_DATABASE_URL", f"sqlite+aiosqlite:///{existing_db}")
+    app = application()
+    try:
+        assert app is not None
+    finally:
+        await app.state.session_factory.kw["bind"].dispose()

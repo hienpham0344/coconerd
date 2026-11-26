@@ -13,7 +13,10 @@ async function serve(t, handler) {
 
 test('development dependencies load while private source and environment files stay private', () => {
   assert.equal(isPrivatePath('/node_modules/.vite/deps/react.js', true), false);
-  for (const path of ['/.env', '/.env.local', '/server/index.mjs', '/bridge/app.py', '/.git/config', '/node_modules/.vite/deps/.env']) {
+  for (const path of [
+    '/.env', '/.env.local', '/server/index.mjs', '/bridge/app.py', '/.git/config', '/node_modules/.vite/deps/.env',
+    '//server/index.mjs', '/%2fserver/index.mjs', '/%2eenv', '/SERVER/index.mjs', '/api/[...path].mjs', '/server\\index.mjs', '/%E0%A4%A',
+  ]) {
     assert.equal(isPrivatePath(path, true), true, path);
   }
   assert.equal(isPrivatePath('/node_modules/.vite/deps/react.js', false), true);

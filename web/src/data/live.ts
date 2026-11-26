@@ -15,33 +15,34 @@ export async function privateRequest<T>(path: string, init: RequestInit = {}): P
   }
 }
 
-export function dashboardRequest<T>(guildId: string, resource: string, csrf: string, method = 'GET', body?: unknown): Promise<T> {
+export function dashboardRequest<T>(guildId: string, resource: string, csrf: string, method = 'GET', body?: unknown, signal?: AbortSignal): Promise<T> {
   return privateRequest<T>('/api/dashboard/guilds/' + encodeURIComponent(guildId) + '/' + resource, {
     method,
     headers: method === 'GET' ? undefined : { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
     body: body === undefined ? undefined : JSON.stringify(body),
+    ...(signal ? { signal } : {}),
   });
 }
 
 export function liveClient(csrf: string): DashboardClient {
-  const get = <T>(guild: string, resource: string) => dashboardRequest<T>(guild, resource, csrf);
+  const get = <T>(guild: string, resource: string, signal?: AbortSignal) => dashboardRequest<T>(guild, resource, csrf, 'GET', undefined, signal);
   return {
-    guilds: async () => (await privateRequest<{ items: Guild[] }>('/api/dashboard/guilds')).items,
-    overview: (guild: Guild) => get<Overview>(guild.guild_id, 'overview'),
-    topics: (guild, q = '', status = '', offset = 0) => {
+    guilds: async (signal?: AbortSignal) => (await privateRequest<{ items: Guild[] }>('/api/dashboard/guilds', signal ? { signal } : {})).items,
+    overview: (guild: Guild, signal?: AbortSignal) => get<Overview>(guild.guild_id, 'overview', signal),
+    topics: (guild, q = '', status = '', offset = 0, signal?: AbortSignal) => {
       const params = new URLSearchParams({ q, offset: String(offset), limit: '12' });
       if (status) params.set('status', status);
-      return get<TopicPage>(guild, 'topics?' + params);
+      return get<TopicPage>(guild, 'topics?' + params, signal);
     },
-    topic: (guild, id) => get<Topic>(guild, 'topics/' + encodeURIComponent(id)),
-    messages: async (topic, before) => {
+    topic: (guild, id, signal?: AbortSignal) => get<Topic>(guild, 'topics/' + encodeURIComponent(id), signal),
+    messages: async (topic, before, signal?: AbortSignal) => {
       const params = new URLSearchParams({ limit: '50' }); if (before) params.set('before', before);
-      return (await get<{ items: Message[] }>(topic.guild_id, 'topics/' + encodeURIComponent(topic.topic_id) + '/messages?' + params)).items;
+      return (await get<{ items: Message[] }>(topic.guild_id, 'topics/' + encodeURIComponent(topic.topic_id) + '/messages?' + params, signal)).items;
     },
-    summary: async topic => {
-      try { return await get<Summary>(topic.guild_id, 'topics/' + encodeURIComponent(topic.topic_id) + '/summary'); }
+    summary: async (topic, signal?: AbortSignal) => {
+      try { return await get<Summary>(topic.guild_id, 'topics/' + encodeURIComponent(topic.topic_id) + '/summary', signal); }
       catch (error) { if (error instanceof ApiError && error.status === 404) return null; throw error; }
     },
-    close: async topic => { await dashboardRequest(topic.guild_id, 'topics/' + encodeURIComponent(topic.topic_id) + '/close', csrf, 'POST'); },
+    close: async (topic, signal?: AbortSignal) => { await dashboardRequest(topic.guild_id, 'topics/' + encodeURIComponent(topic.topic_id) + '/close', csrf, 'POST', undefined, signal); },
   };
 }

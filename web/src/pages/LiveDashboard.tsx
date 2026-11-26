@@ -14,11 +14,12 @@ export default function LiveDashboard({ route }: { route: string }) {
   const api = useMemo(() => liveClient(session?.csrfToken || ''), [session?.csrfToken]);
   useEffect(() => {
     let active = true;
+    const controller = new AbortController();
     setBusy(true); setError(''); setSession(null);
-    void request<LoginSession>('/api/auth/session', { cache: 'no-store' }).then(value => {
+    void request<LoginSession>('/api/auth/session', { credentials: 'same-origin', cache: 'no-store', signal: controller.signal }).then(value => {
       if (active) setSession(value);
-    }).catch(e => { if (active && !(e instanceof ApiError && e.status === 401)) setError(errorMessage(e)); }).finally(() => { if (active) setBusy(false); });
-    return () => { active = false; };
+    }).catch(e => { if (active && !controller.signal.aborted && !(e instanceof ApiError && e.status === 401)) setError(errorMessage(e)); }).finally(() => { if (active) setBusy(false); });
+    return () => { active = false; controller.abort(); };
   }, [revision]);
   useEffect(() => {
     const denied = (event: Event) => {
@@ -31,14 +32,16 @@ export default function LiveDashboard({ route }: { route: string }) {
   }, []);
   useEffect(() => {
     if (!session) return;
-    const timer = setTimeout(() => { setSession(null); setError('Phiên đăng nhập đã hết hạn.'); }, Math.max(0, Date.parse(session.expiresAt) - Date.now()));
+    const remaining = Date.parse(session.expiresAt) - Date.now();
+    if (!Number.isFinite(remaining)) return;
+    const timer = setTimeout(() => { setSession(null); setError('Phiên đăng nhập đã hết hạn.'); }, Math.min(Math.max(0, remaining), 2_147_483_647));
     return () => clearTimeout(timer);
   }, [session]);
   const logout = async () => {
     if (!session) return;
     try {
       await privateRequest('/api/auth/logout', { method: 'POST', headers: { 'X-CSRF-Token': session.csrfToken } });
-      setSession(null); location.hash = '/app';
+      setSession(null); setError(''); location.hash = '/app';
     } catch (e) { setError(errorMessage(e)); }
   };
   if (busy) return <div className="full-loading"><Loading label="Đang kiểm tra phiên đăng nhập…" /></div>;

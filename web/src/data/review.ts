@@ -16,11 +16,23 @@ export function snapshotFor(topicId: string, summary: Record<string, unknown> | 
   return result;
 }
 
+export function normalizeSnapshot(item: ReviewedSummary): ReviewedSummary {
+  const normalized: ReviewedSummary = {
+    ...item,
+    overview: item.overview.trim(),
+    source_message_ids: item.source_message_ids.flatMap(id => id.split(/[\s,]+/)).map(id => id.trim()).filter(Boolean),
+  };
+  for (const field of memoryFields) {
+    normalized[field] = item[field].map(text => text.trim()).filter(Boolean);
+  }
+  return normalized;
+}
+
 export function validateSnapshots(snapshots: ReviewedSummary[]) {
   for (const item of snapshots) {
     if (new Set(item.source_message_ids).size !== item.source_message_ids.length) throw new Error('ID nguồn không được trùng nhau.');
     if (!item.source_message_ids.length && (item.overview.trim() || memoryFields.some(field => item[field].length))) throw new Error('Memory có nội dung cần ít nhất một tin nhắn nguồn. Hãy sửa memory và nguồn trước khi lưu.');
-    if (item.overview.length > 10000 || memoryFields.some(field => item[field].length > 50 || item[field].some(text => !text.trim() || text.length > 2000)) || item.source_message_ids.length > 500) throw new Error('Memory hoặc nguồn vượt giới hạn cho phép.');
+    if (item.overview.length > 10000 || memoryFields.some(field => item[field].length > 50 || item[field].some(text => !text.trim() || text.length > 2000)) || item.source_message_ids.length > 500 || item.source_message_ids.some(id => !id.trim() || id.length > 100)) throw new Error('Memory hoặc nguồn vượt giới hạn cho phép.');
   }
 }
 

@@ -7,14 +7,22 @@ export class ApiError extends Error {
 }
 
 export async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const signal = init.signal ? AbortSignal.any([init.signal, AbortSignal.timeout(10_000)]) : AbortSignal.timeout(10_000);
   let response: Response;
-  try { response = await fetch(path, { ...init, signal: init.signal || AbortSignal.timeout(10_000) }); }
-  catch { throw new ApiError(0, 'Chưa kết nối được website. Thử lại sau một chút nhé.'); }
+  try { response = await fetch(path, { ...init, signal }); }
+  catch (error) {
+    if (init.signal?.aborted) throw error;
+    throw new ApiError(0, 'Chưa kết nối được website. Thử lại sau một chút nhé.');
+  }
   if (response.status === 204) return undefined as T;
-  let data;
+  let data: unknown;
   try { data = await response.json(); }
-  catch { throw new ApiError(502, 'Chưa đọc được phản hồi từ website.'); }
-  if (!response.ok) throw new ApiError(response.status, typeof data.detail === 'string' ? data.detail : 'Chưa thể hoàn thành thao tác.');
+  catch (error) {
+    if (init.signal?.aborted) throw error;
+    throw new ApiError(502, 'Chưa đọc được phản hồi từ website.');
+  }
+  const detail = data && typeof data === 'object' && 'detail' in data && typeof (data as { detail: unknown }).detail === 'string' ? (data as { detail: string }).detail : 'Chưa thể hoàn thành thao tác.';
+  if (!response.ok) throw new ApiError(response.status, detail);
   return data as T;
 }
 
@@ -24,7 +32,8 @@ function stored<T>(key: string, fallback: T): T {
 }
 
 export function resetDemo() {
-  Object.keys(localStorage).filter(key => key.startsWith('coconerd-demo-')).forEach(key => localStorage.removeItem(key));
+  try { Object.keys(localStorage).filter(key => key.startsWith('coconerd-demo-')).forEach(key => localStorage.removeItem(key)); }
+  catch { /* Ignore restricted storage in private browsing */ }
 }
 
 export function demoGuildForTopic(topicId?: string) {
@@ -32,13 +41,13 @@ export function demoGuildForTopic(topicId?: string) {
 }
 
 export interface DashboardClient {
-  guilds(): Promise<Guild[]>;
-  overview(guild: Guild): Promise<Overview>;
-  topics(guildId: string, query?: string, status?: string, offset?: number): Promise<TopicPage>;
-  topic(guildId: string, topicId: string): Promise<Topic>;
-  messages(topic: Topic, before?: string): Promise<Message[]>;
-  summary(topic: Topic): Promise<Summary | null>;
-  close(topic: Topic): Promise<void>;
+  guilds(signal?: AbortSignal): Promise<Guild[]>;
+  overview(guild: Guild, signal?: AbortSignal): Promise<Overview>;
+  topics(guildId: string, query?: string, status?: string, offset?: number, signal?: AbortSignal): Promise<TopicPage>;
+  topic(guildId: string, topicId: string, signal?: AbortSignal): Promise<Topic>;
+  messages(topic: Topic, before?: string, signal?: AbortSignal): Promise<Message[]>;
+  summary(topic: Topic, signal?: AbortSignal): Promise<Summary | null>;
+  close(topic: Topic, signal?: AbortSignal): Promise<void>;
 }
 
 export function client(): DashboardClient {

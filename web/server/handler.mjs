@@ -20,6 +20,7 @@ function discordLink(value, kind) {
 }
 
 export function createHandler(config = {}, next) {
+  const fetchImpl = config.fetchImpl || fetch;
   const dashboard = createDashboardHandler(config);
   const links = { inviteUrl: discordLink(config.inviteUrl, 'invite'), supportUrl: discordLink(config.supportUrl, 'support') };
   let cached;
@@ -34,10 +35,10 @@ export function createHandler(config = {}, next) {
         try {
           const url = new URL(config.statusUrl);
           if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) throw new Error('Invalid health URL');
-          const response = await fetch(url, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(5000), redirect: 'error' });
+          const response = await fetchImpl(url, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(5000), redirect: 'error' });
           const result = await response.json();
           const states = ['ok', 'unavailable', 'unknown'];
-          if (!response.ok || !['ok', 'degraded'].includes(result.status) || !states.includes(result.database) || !states.includes(result.worker)) throw new Error('Invalid health response');
+          if (!response.ok || !result || typeof result !== 'object' || !['ok', 'degraded'].includes(result.status) || !states.includes(result.database) || !states.includes(result.worker)) throw new Error('Invalid health response');
           data.database = result.database;
           data.worker = result.worker;
           data.status = result.status === 'ok' && result.database === 'ok' && result.worker === 'ok' ? 'ok' : 'degraded';
@@ -54,7 +55,10 @@ export function createHandler(config = {}, next) {
     res.setHeader('Referrer-Policy', 'same-origin');
     res.setHeader('X-Frame-Options', 'DENY');
     let url;
-    try { url = new URL(req.url, 'http://localhost'); }
+    try {
+      if (typeof req.url !== 'string' || !req.url.startsWith('/') || req.url.startsWith('//')) throw new Error();
+      url = new URL(req.url, 'http://localhost');
+    }
     catch { return json(res, 400, { detail: 'Đường dẫn không hợp lệ.' }); }
     if (await dashboard(req, res, url)) return;
     if (!url.pathname.startsWith('/api/')) return next ? next(req, res) : json(res, 404, { detail: 'Không tìm thấy trang.' });

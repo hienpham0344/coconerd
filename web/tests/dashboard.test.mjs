@@ -8,7 +8,7 @@ const GUILD = '123456789012345678';
 const OTHER = '223456789012345678';
 function fixture() {
   const credentials = new Map(); const calls = [];
-  const state = { guilds: [{ id: GUILD, name: 'Garden', owner: true, permissions: '0' }], discordDown: false, tokenSeconds: 3600 };
+  const state = { guilds: [{ id: GUILD, name: 'Garden', owner: true, permissions: '0' }], discordDown: false, botUnauthorized: false, tokenSeconds: 3600 };
   const json = (data, status = 200) => new Response(status === 204 ? null : JSON.stringify(data), { status });
   const config = {
     clientId: GUILD, clientSecret: 'discord-client-secret', sessionSecret: 'test-encryption-key-at-least-32-characters',
@@ -27,7 +27,7 @@ function fixture() {
         }
         if (url.pathname.endsWith('/users/@me')) return json({ id: '323456789012345678', username: 'hien', global_name: 'Hien', avatar: null });
         if (url.pathname.endsWith('/users/@me/guilds')) return json(state.guilds);
-        if (url.pathname.endsWith('/channels')) return json([{ id: '423456789012345678', guild_id: GUILD, name: 'general', type: 0 }]);
+        if (url.pathname.endsWith('/channels')) return state.botUnauthorized ? json({}, 401) : json([{ id: '423456789012345678', guild_id: GUILD, name: 'general', type: 0 }]);
         return json({}, 404);
       }
       assert.equal(url.host, 'backend.test', 'no arbitrary upstream');
@@ -177,4 +177,44 @@ test('refresh cannot recreate a session concurrently revoked by logout', async (
   f.state.beforeRefresh = () => f.credentials.delete(key);
   assert.equal((await request(f.handler, '/api/auth/session', auth)).status, 401);
   assert.equal(f.credentials.has(key), false);
+});
+
+test('concurrent reads coalesce Discord guild checks, bot token 401 keeps user session, and settings/model validate inputs', async () => {
+  const f = fixture(); const auth = await login(f);
+  const beforeCalls = f.calls.filter(c => c.url.pathname.endsWith('/users/@me/guilds')).length;
+  const [r1, r2, r3] = await Promise.all([
+    request(f.handler, `/api/dashboard/guilds/${GUILD}/overview`, auth),
+    request(f.handler, `/api/dashboard/guilds/${GUILD}/topics`, auth),
+    request(f.handler, `/api/dashboard/guilds/${GUILD}/settings`, auth),
+  ]);
+  assert.equal(r1.status, 200); assert.equal(r2.status, 200); assert.equal(r3.status, 200);
+  const afterCalls = f.calls.filter(c => c.url.pathname.endsWith('/users/@me/guilds')).length;
+  assert.equal(afterCalls - beforeCalls, 1, 'concurrent reads must coalesce Discord guild permission fetch');
+
+  f.state.botUnauthorized = true;
+  const channelsRes = await request(f.handler, `/api/dashboard/guilds/${GUILD}/channels`, auth);
+  assert.equal(channelsRes.status, 503);
+  assert.equal(channelsRes.headers['set-cookie'], undefined, 'bot token 401 must not clear user session cookie');
+  f.state.botUnauthorized = false;
+
+  const emptyOutput = await request(f.handler, `/api/dashboard/guilds/${GUILD}/settings`, {
+    ...auth, method: 'PUT', origin: 'https://app.test',
+    body: { enabled: true, retention_days: 30, allowed_channel_ids: ['423456789012345678'], output_channel_id: '' },
+  });
+  assert.equal(emptyOutput.status, 422);
+
+  const overlapOutput = await request(f.handler, `/api/dashboard/guilds/${GUILD}/settings`, {
+    ...auth, method: 'PUT', origin: 'https://app.test',
+    body: { enabled: true, retention_days: 30, allowed_channel_ids: ['423456789012345678'], output_channel_id: '423456789012345678' },
+  });
+  assert.equal(overlapOutput.status, 422);
+
+  const badModel = await request(f.handler, `/api/dashboard/guilds/${GUILD}/model`, {
+    ...auth, method: 'PUT', origin: 'https://app.test',
+    body: { provider: 'meta', model_id: 'm', temperature: 0.1, max_tokens: 512, guild_id: OTHER },
+  });
+  assert.equal(badModel.status, 422);
+
+  const headBypass = await request(f.handler, `/api/dashboard/guilds/${GUILD}/overview`, { ...auth, method: 'HEAD' });
+  assert.equal(headBypass.status, 403);
 });

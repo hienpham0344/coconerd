@@ -16,6 +16,7 @@ export function environmentConfig(env = process.env) {
 }
 
 export function normalizeFunctionUrl(value) {
+  if (typeof value !== 'string' || !value.startsWith('/') || value.startsWith('//')) throw new Error('Invalid request URL');
   const url = new URL(value, 'http://localhost');
   if (['/api/auth/discord', '/api/auth/discord/callback'].includes(url.pathname)) {
     return url.pathname.slice(4) + url.search;

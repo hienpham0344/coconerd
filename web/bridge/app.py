@@ -13,15 +13,20 @@ def create_bridge(settings=None, session_factory=None):
 
 def application():
     settings = Settings()
-    if not os.getenv("COCONERD_DATABASE_URL"):
+    if not (os.getenv("COCONERD_DATABASE_URL") or os.getenv("DATABASE_URL")):
         raise RuntimeError(
             "Set COCONERD_DATABASE_URL to your existing migrated database; "
             "the bridge never creates or migrates user data."
         )
-    database = settings.database_url.removeprefix("sqlite+aiosqlite:///").split("?", 1)[0]
-    if not Path(database).is_file():
-        raise RuntimeError(
-            "The selected database does not exist. "
-            "Use the database already configured for the backend worker."
+    if settings.database_url.startswith("sqlite"):
+        database = (
+            settings.database_url.removeprefix("sqlite+aiosqlite:///")
+            .removeprefix("sqlite:///")
+            .split("?", 1)[0]
         )
+        if database != ":memory:" and not Path(database).is_file():
+            raise RuntimeError(
+                "The selected database does not exist. "
+                "Use the database already configured for the backend worker."
+            )
     return create_bridge(settings)

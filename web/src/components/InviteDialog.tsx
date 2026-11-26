@@ -11,11 +11,12 @@ export function InviteDialog({ onClose }: { onClose: () => void }) {
   const [revision, setRevision] = useState(0);
   useEffect(() => {
     let active = true;
+    const controller = new AbortController();
     setConfig(null); setError('');
-    void request<SiteConfig>('/api/site').then(result => {
+    void request<SiteConfig>('/api/site', { signal: controller.signal }).then(result => {
       if (active) setConfig(result);
-    }).catch(cause => { if (active) setError(errorMessage(cause)); });
-    return () => { active = false; };
+    }).catch(cause => { if (active && !controller.signal.aborted) setError(errorMessage(cause)); });
+    return () => { active = false; controller.abort(); };
   }, [revision]);
 
   return <Dialog title="Thêm Coconerd vào Discord" onClose={onClose}>

@@ -5,10 +5,14 @@ export function createDashboardHandler(config = {}) {
   const rates = new Map();
   function rate(key, limit) {
     const now = Date.now();
-    if (rates.size > 5000) for (const [id, item] of rates) if (item.until <= now) rates.delete(id);
     const record = rates.get(key);
-    if (!record || record.until <= now) rates.set(key, { count: 1, until: now + 60000 });
-    else if (++record.count > limit) throw new HttpError(429, 'Quá nhiều yêu cầu. Vui lòng thử lại sau một phút.');
+    if (!record || record.until <= now) {
+      if (rates.size >= 5000) {
+        for (const [id, item] of rates) if (item.until <= now) rates.delete(id);
+        if (rates.size >= 5000) rates.delete(rates.keys().next().value);
+      }
+      rates.set(key, { count: 1, until: now + 60000 });
+    } else if (++record.count > limit) throw new HttpError(429, 'Quá nhiều yêu cầu. Vui lòng thử lại sau một phút.');
   }
   function query(url, allowed) {
     for (const key of url.searchParams.keys()) {
@@ -33,7 +37,7 @@ export function createDashboardHandler(config = {}) {
       }
       const data = await auth.session(req);
       rate('session:' + data.id, 180);
-      const write = !['GET', 'HEAD'].includes(req.method);
+      const write = req.method !== 'GET';
       if (write) auth.csrf(req, data);
       if (url.pathname === '/api/auth/session' && req.method === 'GET') {
         query(url, []);
@@ -49,6 +53,7 @@ export function createDashboardHandler(config = {}) {
         const items = [];
         for (let offset = 0; ; offset += 200) {
           const result = await auth.backend('/api/v1/admin/web/guilds?limit=200&offset=' + offset);
+          if (!Array.isArray(result?.items)) throw new HttpError(502, 'Phản hồi backend không hợp lệ.');
           for (const guild of result.items) if (permissions.has(guild.guild_id)) items.push({ ...guild, name: permissions.get(guild.guild_id).name });
           if (result.items.length < 200) break;
           if (offset > 100000) throw new HttpError(503, 'Chưa tải đủ danh sách server.');
@@ -73,14 +78,21 @@ export function createDashboardHandler(config = {}) {
         path = req.method === 'GET' ? base + '/settings' : '/api/v1/admin/guilds/' + guild + '/settings';
         if (write) {
           body = await readBody(req);
-          if (Object.keys(body).some(k => !['enabled', 'allowed_channel_ids', 'retention_days', 'output_channel_id'].includes(k)) || !Array.isArray(body.allowed_channel_ids)) throw new HttpError(422, 'Cấu hình server không hợp lệ.');
+          const hasOutput = body.output_channel_id !== undefined && body.output_channel_id !== null;
+          if (Object.keys(body).some(k => !['enabled', 'allowed_channel_ids', 'retention_days', 'output_channel_id'].includes(k)) ||
+              !Array.isArray(body.allowed_channel_ids) ||
+              (hasOutput && typeof body.output_channel_id !== 'string')) throw new HttpError(422, 'Cấu hình server không hợp lệ.');
+          if (hasOutput && body.allowed_channel_ids.includes(body.output_channel_id)) throw new HttpError(422, 'Kênh đầu ra phải khác kênh đầu vào.');
           const valid = new Set((await auth.channels(guild)).map(c => c.id));
-          const ids = [...body.allowed_channel_ids, ...(body.output_channel_id ? [body.output_channel_id] : [])];
-          if (ids.some(id => !valid.has(id))) throw new HttpError(422, 'Kênh phải thuộc server đang quản trị.');
+          const ids = [...body.allowed_channel_ids, ...(hasOutput ? [body.output_channel_id] : [])];
+          if (ids.some(id => typeof id !== 'string' || !valid.has(id))) throw new HttpError(422, 'Kênh phải thuộc server đang quản trị.');
         }
       } else if (resource === 'model' && ['GET', 'PUT'].includes(req.method)) {
         query(url, []); path = '/api/v1/admin/model-config'; params.set('guild_id', guild);
-        if (write) body = await readBody(req);
+        if (write) {
+          body = await readBody(req);
+          if (Object.keys(body).some(k => !['provider', 'model_id', 'temperature', 'max_tokens'].includes(k))) throw new HttpError(422, 'Cấu hình AI không hợp lệ.');
+        }
       } else {
         const topic = resource.match(/^topics\/([A-Za-z0-9_-]{1,100})(?:\/(messages|summary|close|sync|resume-sync))?$/);
         const message = resource.match(/^messages\/([A-Za-z0-9_-]{1,100})\/(review|corrections)$/);
